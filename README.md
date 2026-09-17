@@ -164,6 +164,5 @@ template for that simpler shape.
 
 ## License
 
-No license file yet — add one before publishing (MIT would match both
-Haiku's own convention and this project's dependency on Haiku's MIT-
-licensed headers, but that's your call to make).
+MIT — see [LICENSE](LICENSE). This matches both Haiku's own convention and
+this project's dependency on Haiku's MIT-licensed headers.
