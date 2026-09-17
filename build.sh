@@ -16,6 +16,6 @@ mcs -target:exe -out:Sample.exe -reference:Haiku.App.dll managed/Sample/*.cs
 
 echo
 echo "Build complete. Run the sample with:"
-echo "  LIBRARY_PATH=\"\$(pwd)/native:\$LIBRARY_PATH\" mono Sample.exe"
+echo "  LIBRARY_PATH=\"\$(pwd)/native:\$HOME/config/non-packaged/lib:\$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:\$LIBRARY_PATH\" mono Sample.exe"
 echo
 echo "(Haiku's runtime_loader uses LIBRARY_PATH, not LD_LIBRARY_PATH -- see README.md.)"

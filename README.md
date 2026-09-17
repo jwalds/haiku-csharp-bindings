@@ -1,7 +1,7 @@
 # haiku-csharp-bindings
 
 C# bindings for Haiku OS's native BeAPI, for use from the [Mono 6.14.1 port
-to Haiku](https://github.com/jwalds/haikuports/commit/136b79cbe) this project
+to Haiku](https://github.com/jwalds/haikuports) this project
 grew out of. Not affiliated with or endorsed by the Haiku project.
 
 ## Why a hand-written C shim
@@ -93,7 +93,7 @@ the mono port).
 
 ```
 ./build.sh
-LIBRARY_PATH="$(pwd)/native:$LIBRARY_PATH" mono Sample.exe
+LIBRARY_PATH="$(pwd)/native:$HOME/config/non-packaged/lib:$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:$LIBRARY_PATH" mono Sample.exe
 ```
 
 (Haiku's own dynamic loader does not use `LD_LIBRARY_PATH` the way Linux does --
@@ -102,7 +102,17 @@ instead. Setting `LD_LIBRARY_PATH` here is silently ignored, which is why an
 otherwise-correct build can still fail to find `libhaikusharp.so` with a
 `DllNotFoundException` at run time. Using an absolute path for the `native`
 directory, rather than a bare relative `native`, avoids any ambiguity about
-what the loader resolves a relative `LIBRARY_PATH` entry against.)
+what the loader resolves a relative `LIBRARY_PATH` entry against.
+
+The explicit system lib directories in that command (rather than just
+appending the ambient `$LIBRARY_PATH`) matter more than they look: Haiku's
+`SetupEnvironment` boot script, which normally populates `LIBRARY_PATH` with
+those same paths, only runs for a desktop session. An SSH login shell does
+not get it, so `$LIBRARY_PATH` there starts out empty, and appending an
+empty variable to your own native directory finds *only* your own directory
+-- silently missing system libraries like `libbsd.so` that `libnetwork.so`
+needs. Spelling out the full path explicitly works the same whether you are
+sitting at Haiku's own Terminal or running this over SSH.)
 
 Expected output:
 
