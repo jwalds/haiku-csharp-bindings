@@ -1,0 +1,9 @@
+# Native build artifacts
+native/*.o
+native/libhaikusharp.so
+
+# Managed build artifacts
+*.dll
+*.exe
+*.mdb
+*.pdb
