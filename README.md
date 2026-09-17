@@ -1,7 +1,7 @@
 # haiku-csharp-bindings
 
 C# bindings for Haiku OS's native BeAPI, for use from the [Mono 6.14.1 port
-to Haiku](https://github.com/jwalds/haikuports/commit/136b79cbe) this project
+to Haiku](https://github.com/jwalds/haikuports) this project
 grew out of. Not affiliated with or endorsed by the Haiku project.
 
 ## Why a hand-written C shim
