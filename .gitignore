@@ -1,5 +1,5 @@
 # Native build artifacts
-native/*.o
+native/**/*.o
 native/libhaikusharp.so
 
 # Managed build artifacts
