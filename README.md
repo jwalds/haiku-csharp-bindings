@@ -55,19 +55,30 @@ the much larger Interface Kit (~52 classes) or anything else. Concretely:
   (`HSApplication`, in `native/`). Override `OnMessageReceived`,
   `OnQuitRequested`, `OnReadyToRun`.
 - `Haiku.App.Message` -- wraps `BMessage`. Covers the full scalar Add/Find
-  set (`int8`/`int16`/`int32`/`int64`/`float`/`double`/`bool`/`string`),
-  `Point`/`Rect` (see `Haiku.App.Geometry` -- minimal placeholders ahead of
-  a real Interface Kit wrapper), `pointer` (a raw `IntPtr`, meaningful only
-  within your own process), and the `What` field.
+  set (`int8`/`int16`/`int32`/`int64`/`uint8`/`uint16`/`uint32`/`uint64`/
+  `float`/`double`/`bool`/`string`), `Point`/`Rect`/`Size`/`RgbColor`/
+  `Alignment` (see `Haiku.App.Geometry` -- minimal placeholders ahead of a
+  real Interface Kit wrapper), `pointer` (a raw `IntPtr`, meaningful only
+  within your own process), nested `Message`s (`AddMessage`/`FindMessage`),
+  a generic `Data` escape hatch for any Haiku `type_code`, the `What`
+  field, and the whole-message operations `Has*`/`RemoveName`/`RemoveData`/
+  `MakeEmpty`/`IsEmpty`/`CountNames`/`Rename`/`Append`, plus `Replace*` for
+  every type above.
 - `Haiku.App.SystemMessages` -- a couple of Haiku's own `AppDefs.h`
   constants (`B_QUIT_REQUESTED`, `B_READY_TO_RUN`), packed the same way
   Haiku's own C++ headers pack them.
 
 Not yet covered: `BWindow`/`BView`/anything Interface Kit (no GUI yet --
 this is deliberately windowless), `BMessenger`, `BInvoker`,
-`BMessageFilter`/`BMessageQueue`/`BMessageRunner`, `BRoster`, `BMessage`'s
-flattened-object Add/Find pair (`AddFlat`/`FindFlat`, which needs
-`BFlattenable`), and archiving (`BArchivable`).
+`BMessageFilter`/`BMessageQueue`/`BMessageRunner`, `BRoster`, filesystem
+references (`entry_ref`/`node_ref` -- `AddRef`/`FindRef`/`AddNodeRef`/
+`FindNodeRef`, which fit more naturally with a future Storage Kit
+wrapper), `BMessage`'s flattened-object Add/Find pair (`AddFlat`/
+`FindFlat`, which needs `BFlattenable`), archiving (`BArchivable`),
+scripting specifiers, delivery/reply plumbing (`SendReply`,
+`WasDelivered`, etc. -- these belong more with `BMessenger`/`BLooper`),
+and the `Get*`/`Set*` convenience-with-defaults sugar and indexed
+(multiple-values-per-name) overloads real `BMessage` also has.
 
 ## The open question this slice exists to answer
 
@@ -156,14 +167,24 @@ App exited cleanly.
 
 ## Adding more BMessage fields
 
-Mechanical and low-risk once the shape above is proven: for each new
-Add<Type>/Find<Type> pair you want, add one `extern "C"` function to
-`hs_message.h`/`.cpp` following the existing `Int32`/`String`/`Bool`
-functions exactly, then one matching `DllImport` in `Native.cs` and one
-public method in `Message.cs`. `Point`/`Rect`/`float`/`double` are the
-obvious next ones; anything that hands back a pointer into BMessage's own
-storage (like `FindString` does) needs the same "copy into managed memory
-immediately" treatment `Message.FindString` already does.
+Mechanical and low-risk once the shape above is proven -- which is now
+demonstrated across the full core round-trip (every scalar type, the
+geometry-ish struct types, nested messages, generic data, and
+`Has*`/`Replace*`/`RemoveName`/`CountNames`/etc. for all of them; see
+`managed/Sample/Program.cs`'s `TestMessageRoundTrip` for a working example
+of each one). For a new `Add<Type>`/`Find<Type>` pair: one `extern "C"`
+function to `hs_message.h`/`.cpp` following the existing functions
+exactly, one matching `DllImport` in `Native.cs`, one public method in
+`Message.cs`. `Has<Type>`/`Replace<Type>` follow that exact same shape
+once `Add`/`Find` exist. Anything that hands back a pointer into
+BMessage's own storage (like `FindString`/`FindData` do) needs the same
+"copy into managed memory immediately" treatment those already do.
+
+What's NOT mechanical, and needs real design first: `BMessenger` (a
+lightweight cross-team handle, not a plain struct), `entry_ref`/
+`node_ref` (filesystem references -- a natural fit for a future Storage
+Kit wrapper instead), and `AddFlat`/`FindFlat` (needs a `BFlattenable`
+design of its own).
 
 ## Adding a new kit (e.g. Interface Kit next)
 

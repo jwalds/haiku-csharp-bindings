@@ -59,6 +59,41 @@ typedef struct {
 	float bottom;
 } hs_rect;
 
+/* Mirrors BSize's exact field layout (headers/os/interface/Size.h), same
+ * placeholder status as hs_point/hs_rect above. */
+typedef struct {
+	float width;
+	float height;
+} hs_size;
+
+/* Mirrors rgb_color's exact field layout (headers/os/interface/
+ * GraphicsDefs.h): four plain uint8s, no vtable. Not a placeholder for a
+ * future wrapper the way hs_point/hs_rect/hs_size are -- Haiku's rgb_color
+ * is already just a plain C struct, so there is nothing to eventually
+ * replace this with. */
+typedef struct {
+	uint8_t red;
+	uint8_t green;
+	uint8_t blue;
+	uint8_t alpha;
+} hs_rgb_color;
+
+/* Mirrors BAlignment's two enum fields (headers/os/interface/Alignment.h)
+ * as plain int32s. The managed side defines its own HorizontalAlignment/
+ * VerticalAlignment enums with matching numeric values (see Geometry.cs)
+ * rather than depend on Haiku's exact enum values staying stable, even
+ * though in practice BeOS/Haiku ABI compatibility means they won't change:
+ *   alignment: B_ALIGN_LEFT=0, B_ALIGN_RIGHT=1, B_ALIGN_CENTER=2,
+ *              B_ALIGN_HORIZONTAL_UNSET=-1, B_ALIGN_USE_FULL_WIDTH=-2
+ *   vertical_alignment: B_ALIGN_TOP=0x10, B_ALIGN_MIDDLE=0x20,
+ *              B_ALIGN_BOTTOM=0x30, B_ALIGN_VERTICAL_UNSET=-1,
+ *              B_ALIGN_USE_FULL_HEIGHT=-2
+ */
+typedef struct {
+	int32_t horizontal;
+	int32_t vertical;
+} hs_alignment;
+
 #ifdef __cplusplus
 }
 #endif
