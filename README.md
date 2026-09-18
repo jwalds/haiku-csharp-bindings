@@ -91,12 +91,13 @@ auto-attach an unrecognized calling thread on first entry — but that's an
 expectation carried over from how Mono's embedding API generally behaves,
 **not something verified on this exact Mono 6.14.1-on-Haiku build yet**.
 
-`managed/Sample/Program.cs` exists specifically to test this: if you see
-its four `[1]`–`[4]` `Console.WriteLine` calls in order followed by a clean
-exit, the cross-thread callback story holds up here and the rest of this
-plan (Interface Kit, etc.) can proceed on solid ground. If it hangs or
-crashes instead, that's the very first thing to debug — everything else in
-this binding depends on it.
+`managed/Sample/Program.cs` exists to demonstrate this, and
+`managed/Tests/ApplicationTests.cs`'s
+`ReadyToRunMessageAndQuitRequestedAllFireInOrder` is the same scenario as an
+actual regression test (see "Testing" below): if it passes, the cross-thread
+callback story holds up here and the rest of this plan (Interface Kit, etc.)
+can proceed on solid ground. If it hangs or crashes instead, that's the very
+first thing to debug — everything else in this binding depends on it.
 
 ## Building and running (on Haiku)
 
@@ -138,6 +139,56 @@ Expected output:
 App exited cleanly.
 ```
 
+## Testing
+
+`managed/Tests/` builds to `Tests.exe`, a small console app that runs every
+`[Test]`-tagged method it finds and prints a pass/fail/error summary,
+exiting nonzero if anything didn't pass:
+
+```
+./build.sh
+LIBRARY_PATH="$(pwd)/native:$HOME/config/non-packaged/lib:$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:$LIBRARY_PATH" mono Tests.exe
+```
+
+Pass a substring to run just one class, e.g. `mono Tests.exe Message` for
+only `MessageTests`. Two classes exist today:
+
+- `MessageTests` -- one small, fast, isolated test per `BMessage` Add/Find
+  pair or whole-message operation (see `managed/Tests/MessageTests.cs`).
+  Add a new one here alongside every new `hs_message.h` function.
+- `ApplicationTests` -- the Application Kit threading proof from "The open
+  question" above, as an actual regression test rather than something you
+  verify by eye. Slower and less isolated than a `MessageTests` case (it
+  spins up a real `BApplication` and blocks on a real native message
+  loop), but it belongs in the same suite rather than nowhere.
+
+There is no NUnit (or any test framework) anywhere in this Mono 6.14.1
+port's actual installed GAC, and no realistic way to get one: modern
+NUnit/xUnit target newer .NET than this Mono build implements, and the
+only NUnit on this machine at all is old 2.6.2 copies buried inside an
+unrelated leftover full Mono source checkout (vendored there just to build
+*Mono's own* Newtonsoft.Json/Cecil test suites) -- not something this
+project should depend on, since it isn't ours and could disappear. Instead,
+`managed/Tests/TestAttribute.cs`/`Assert.cs`/`TestRunner.cs` are a
+deliberately tiny (~150 line), dependency-free framework of our own:
+a `[Test]` attribute, reflection-based discovery, a handful of
+`Assert.AreEqual`/`IsTrue`/`IsNull`/`Fail` helpers, and a runner that
+constructs a fresh instance of the test class per test (so one test can't
+see state another left behind) and reports `PASS`/`FAIL`/`ERROR` per test
+plus a final count. `FAIL` means an `Assert.*` call didn't hold; `ERROR`
+means the test threw something else entirely (a null reference, a native
+crash surfacing as an exception, ...) -- worth keeping visually distinct,
+since those call for different next steps. Same rationale as the
+hand-written shim itself: small enough that every line is understood, and
+guaranteed to compile with `mcs` and run on this exact Mono build since we
+control every line of it.
+
+To add a test: write a public, parameterless, `void`-returning instance
+method tagged `[Test]` on a public class anywhere under `managed/Tests/`
+(a new file per kit, following `MessageTests.cs`/`ApplicationTests.cs`),
+throw via one of the `Assert.*` helpers (or `Assert.Fail(...)` directly) to
+report a failure, and rebuild.
+
 ## Ownership rules (read before touching `Application.cs` or `hs_application.cpp`)
 
 1. **A `Message` you construct owns its native `BMessage`** — `Dispose()`
@@ -171,8 +222,9 @@ Mechanical and low-risk once the shape above is proven -- which is now
 demonstrated across the full core round-trip (every scalar type, the
 geometry-ish struct types, nested messages, generic data, and
 `Has*`/`Replace*`/`RemoveName`/`CountNames`/etc. for all of them; see
-`managed/Sample/Program.cs`'s `TestMessageRoundTrip` for a working example
-of each one). For a new `Add<Type>`/`Find<Type>` pair: one `extern "C"`
+`managed/Tests/MessageTests.cs` for a working, run-on-every-change example
+of each one -- see "Testing" below). For a new `Add<Type>`/`Find<Type>`
+pair: one `extern "C"`
 function to `hs_message.h`/`.cpp` following the existing functions
 exactly, one matching `DllImport` in `Native.cs`, one public method in
 `Message.cs`. `Has<Type>`/`Replace<Type>` follow that exact same shape
