@@ -54,17 +54,20 @@ the much larger Interface Kit (~52 classes) or anything else. Concretely:
 - `Haiku.App.Application` — wraps a native `BApplication` subclass
   (`HSApplication`, in `native/`). Override `OnMessageReceived`,
   `OnQuitRequested`, `OnReadyToRun`.
-- `Haiku.App.Message` — wraps `BMessage`, with `int32`/`string`/`bool`
-  Add/Find pairs and the `What` field.
-- `Haiku.App.SystemMessages` — a couple of Haiku's own `AppDefs.h`
+- `Haiku.App.Message` -- wraps `BMessage`. Covers the full scalar Add/Find
+  set (`int8`/`int16`/`int32`/`int64`/`float`/`double`/`bool`/`string`),
+  `Point`/`Rect` (see `Haiku.App.Geometry` -- minimal placeholders ahead of
+  a real Interface Kit wrapper), `pointer` (a raw `IntPtr`, meaningful only
+  within your own process), and the `What` field.
+- `Haiku.App.SystemMessages` -- a couple of Haiku's own `AppDefs.h`
   constants (`B_QUIT_REQUESTED`, `B_READY_TO_RUN`), packed the same way
   Haiku's own C++ headers pack them.
 
-Not yet covered: `BWindow`/`BView`/anything Interface Kit (no GUI yet —
+Not yet covered: `BWindow`/`BView`/anything Interface Kit (no GUI yet --
 this is deliberately windowless), `BMessenger`, `BInvoker`,
-`BMessageFilter`/`BMessageQueue`/`BMessageRunner`, `BRoster`, most of
-`BMessage`'s Add/Find overload set (Point/Rect/float/double/int8/16/64/
-pointer/flattened-object), and archiving (`BArchivable`).
+`BMessageFilter`/`BMessageQueue`/`BMessageRunner`, `BRoster`, `BMessage`'s
+flattened-object Add/Find pair (`AddFlat`/`FindFlat`, which needs
+`BFlattenable`), and archiving (`BArchivable`).
 
 ## The open question this slice exists to answer
 

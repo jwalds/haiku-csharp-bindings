@@ -14,6 +14,8 @@
 #include "hs_message.h"
 
 #include <Message.h>
+#include <Point.h>
+#include <Rect.h>
 
 
 hs_handle hs_message_create(uint32_t what)
@@ -61,6 +63,117 @@ hs_status hs_message_add_bool(hs_handle message, const char* name, bool value)
 hs_status hs_message_find_bool(hs_handle message, const char* name, bool* out_value)
 {
 	return static_cast<BMessage*>(message)->FindBool(name, out_value);
+}
+
+
+hs_status hs_message_add_int8(hs_handle message, const char* name, int8_t value)
+{
+	return static_cast<BMessage*>(message)->AddInt8(name, value);
+}
+
+
+hs_status hs_message_find_int8(hs_handle message, const char* name, int8_t* out_value)
+{
+	return static_cast<BMessage*>(message)->FindInt8(name, out_value);
+}
+
+
+hs_status hs_message_add_int16(hs_handle message, const char* name, int16_t value)
+{
+	return static_cast<BMessage*>(message)->AddInt16(name, value);
+}
+
+
+hs_status hs_message_find_int16(hs_handle message, const char* name, int16_t* out_value)
+{
+	return static_cast<BMessage*>(message)->FindInt16(name, out_value);
+}
+
+
+hs_status hs_message_add_int64(hs_handle message, const char* name, int64_t value)
+{
+	return static_cast<BMessage*>(message)->AddInt64(name, value);
+}
+
+
+hs_status hs_message_find_int64(hs_handle message, const char* name, int64_t* out_value)
+{
+	return static_cast<BMessage*>(message)->FindInt64(name, out_value);
+}
+
+
+hs_status hs_message_add_float(hs_handle message, const char* name, float value)
+{
+	return static_cast<BMessage*>(message)->AddFloat(name, value);
+}
+
+
+hs_status hs_message_find_float(hs_handle message, const char* name, float* out_value)
+{
+	return static_cast<BMessage*>(message)->FindFloat(name, out_value);
+}
+
+
+hs_status hs_message_add_double(hs_handle message, const char* name, double value)
+{
+	return static_cast<BMessage*>(message)->AddDouble(name, value);
+}
+
+
+hs_status hs_message_find_double(hs_handle message, const char* name, double* out_value)
+{
+	return static_cast<BMessage*>(message)->FindDouble(name, out_value);
+}
+
+
+hs_status hs_message_add_point(hs_handle message, const char* name, hs_point point)
+{
+	return static_cast<BMessage*>(message)->AddPoint(name, BPoint(point.x, point.y));
+}
+
+
+hs_status hs_message_find_point(hs_handle message, const char* name, hs_point* out_point)
+{
+	BPoint point;
+	hs_status status = static_cast<BMessage*>(message)->FindPoint(name, &point);
+	if (status == HS_OK) {
+		out_point->x = point.x;
+		out_point->y = point.y;
+	}
+	return status;
+}
+
+
+hs_status hs_message_add_rect(hs_handle message, const char* name, hs_rect rect)
+{
+	return static_cast<BMessage*>(message)->AddRect(name,
+		BRect(rect.left, rect.top, rect.right, rect.bottom));
+}
+
+
+hs_status hs_message_find_rect(hs_handle message, const char* name, hs_rect* out_rect)
+{
+	BRect rect;
+	hs_status status = static_cast<BMessage*>(message)->FindRect(name, &rect);
+	if (status == HS_OK) {
+		out_rect->left = rect.left;
+		out_rect->top = rect.top;
+		out_rect->right = rect.right;
+		out_rect->bottom = rect.bottom;
+	}
+	return status;
+}
+
+
+hs_status hs_message_add_pointer(hs_handle message, const char* name, void* value)
+{
+	return static_cast<BMessage*>(message)->AddPointer(name, value);
+}
+
+
+hs_status hs_message_find_pointer(hs_handle message, const char* name, void** out_value)
+{
+	return static_cast<BMessage*>(message)->FindPointer(name, out_value);
 }
 
 

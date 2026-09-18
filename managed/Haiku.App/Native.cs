@@ -19,6 +19,27 @@ namespace Haiku.App
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ReadyToRunCallback(IntPtr userData);
 
+	/* Mirrors hs_point/hs_rect (see hs_types.h and hs_message.h) exactly --
+	 * Sequential layout with no padding is what lets these cross the
+	 * P/Invoke boundary by value as plain structs. Not meant to be used
+	 * directly by binding consumers; Message.cs converts to/from the
+	 * public Point/Rect types in Geometry.cs. */
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct HsPoint
+	{
+		internal float X;
+		internal float Y;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct HsRect
+	{
+		internal float Left;
+		internal float Top;
+		internal float Right;
+		internal float Bottom;
+	}
+
 	/* Raw P/Invoke surface. Nothing here is meant to be called directly by
 	 * binding consumers -- Message and Application wrap every one of these
 	 * in a safe, idiomatic method. Keeping every DllImport in one file
@@ -60,6 +81,54 @@ namespace Haiku.App
 		[DllImport(Lib)]
 		internal static extern int hs_message_find_bool(IntPtr message, string name,
 			[MarshalAs(UnmanagedType.I1)] out bool outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_int8(IntPtr message, string name, sbyte value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_int8(IntPtr message, string name, out sbyte outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_int16(IntPtr message, string name, short value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_int16(IntPtr message, string name, out short outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_int64(IntPtr message, string name, long value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_int64(IntPtr message, string name, out long outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_float(IntPtr message, string name, float value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_float(IntPtr message, string name, out float outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_double(IntPtr message, string name, double value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_double(IntPtr message, string name, out double outValue);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_point(IntPtr message, string name, HsPoint point);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_point(IntPtr message, string name, out HsPoint outPoint);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_rect(IntPtr message, string name, HsRect rect);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_rect(IntPtr message, string name, out HsRect outRect);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_add_pointer(IntPtr message, string name, IntPtr value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_message_find_pointer(IntPtr message, string name, out IntPtr outValue);
 
 		[DllImport(Lib)]
 		internal static extern int hs_message_add_string(IntPtr message, string name, string value);

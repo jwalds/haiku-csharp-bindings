@@ -58,6 +58,122 @@ namespace Haiku.App
 			return Native.hs_message_find_bool(_handle, name, out value) == 0 ? (bool?)value : null;
 		}
 
+		public void AddInt8(string name, sbyte value)
+		{
+			Check(Native.hs_message_add_int8(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as an int8.</summary>
+		public sbyte? FindInt8(string name)
+		{
+			sbyte value;
+			return Native.hs_message_find_int8(_handle, name, out value) == 0 ? (sbyte?)value : null;
+		}
+
+		public void AddInt16(string name, short value)
+		{
+			Check(Native.hs_message_add_int16(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as an int16.</summary>
+		public short? FindInt16(string name)
+		{
+			short value;
+			return Native.hs_message_find_int16(_handle, name, out value) == 0 ? (short?)value : null;
+		}
+
+		public void AddInt64(string name, long value)
+		{
+			Check(Native.hs_message_add_int64(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as an int64.</summary>
+		public long? FindInt64(string name)
+		{
+			long value;
+			return Native.hs_message_find_int64(_handle, name, out value) == 0 ? (long?)value : null;
+		}
+
+		public void AddFloat(string name, float value)
+		{
+			Check(Native.hs_message_add_float(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as a float.</summary>
+		public float? FindFloat(string name)
+		{
+			float value;
+			return Native.hs_message_find_float(_handle, name, out value) == 0 ? (float?)value : null;
+		}
+
+		public void AddDouble(string name, double value)
+		{
+			Check(Native.hs_message_add_double(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as a double.</summary>
+		public double? FindDouble(string name)
+		{
+			double value;
+			return Native.hs_message_find_double(_handle, name, out value) == 0 ? (double?)value : null;
+		}
+
+		public void AddPoint(string name, Point point)
+		{
+			HsPoint native;
+			native.X = point.X;
+			native.Y = point.Y;
+			Check(Native.hs_message_add_point(_handle, name, native));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as a point.</summary>
+		public Point? FindPoint(string name)
+		{
+			HsPoint native;
+			if (Native.hs_message_find_point(_handle, name, out native) != 0)
+				return null;
+			return new Point(native.X, native.Y);
+		}
+
+		public void AddRect(string name, Rect rect)
+		{
+			HsRect native;
+			native.Left = rect.Left;
+			native.Top = rect.Top;
+			native.Right = rect.Right;
+			native.Bottom = rect.Bottom;
+			Check(Native.hs_message_add_rect(_handle, name, native));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as a rect.</summary>
+		public Rect? FindRect(string name)
+		{
+			HsRect native;
+			if (Native.hs_message_find_rect(_handle, name, out native) != 0)
+				return null;
+			return new Rect(native.Left, native.Top, native.Right, native.Bottom);
+		}
+
+		/// <summary>
+		/// Stores an opaque address verbatim -- BMessage never dereferences it or
+		/// takes ownership of whatever it points to. Meaningful only for passing
+		/// an address (such as another Message's <see cref="Handle"/>, or any
+		/// value meaningful only within your own process) through a message.
+		/// Never pass the address of managed memory here: the garbage collector
+		/// can relocate it, which would leave this pointing at garbage.
+		/// </summary>
+		public void AddPointer(string name, IntPtr value)
+		{
+			Check(Native.hs_message_add_pointer(_handle, name, value));
+		}
+
+		/// <summary>Returns null if <paramref name="name"/> isn't present as a pointer.</summary>
+		public IntPtr? FindPointer(string name)
+		{
+			IntPtr value;
+			return Native.hs_message_find_pointer(_handle, name, out value) == 0 ? (IntPtr?)value : null;
+		}
+
 		public void AddString(string name, string value)
 		{
 			Check(Native.hs_message_add_string(_handle, name, value));

@@ -38,6 +38,27 @@ typedef int32_t hs_status;
  * thread), as returned by BLooper::Run(). */
 typedef int32_t hs_thread_id;
 
+/* Mirrors BPoint's exact field layout (headers/os/interface/Point.h): a
+ * plain aggregate of two floats, no vtable, no methods that matter for
+ * layout purposes. Used by BMessage's Add/FindPoint (see hs_message.h) --
+ * this is a deliberately minimal placeholder for a real BPoint wrapper,
+ * which belongs to the Interface Kit once that kit exists. When it does,
+ * that wrapper should absorb this role rather than duplicate it; nothing
+ * about this shape should need to change to make that possible. */
+typedef struct {
+	float x;
+	float y;
+} hs_point;
+
+/* Mirrors BRect's exact field layout (headers/os/interface/Rect.h), for
+ * the same reason and with the same placeholder status as hs_point above. */
+typedef struct {
+	float left;
+	float top;
+	float right;
+	float bottom;
+} hs_rect;
+
 #ifdef __cplusplus
 }
 #endif
