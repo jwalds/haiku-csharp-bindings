@@ -13,6 +13,7 @@ using Haiku.Testing;
 /// entry into managed code -- see hs_application.h's threading note for why
 /// that was never a given.
 /// </summary>
+[Haiku.Testing.TestModule("Application Kit")]
 public class ApplicationTests
 {
 	private const uint PingMessage = 0x50494E47; // 'PING'

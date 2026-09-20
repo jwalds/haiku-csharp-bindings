@@ -150,17 +150,44 @@ exiting nonzero if anything didn't pass:
 LIBRARY_PATH="$(pwd)/native:$HOME/config/non-packaged/lib:$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:$LIBRARY_PATH" mono Tests.exe
 ```
 
-Pass a substring to run just one class, e.g. `mono Tests.exe Message` for
-only `MessageTests`. Two classes exist today:
+Output is grouped by module and printed as it happens -- each test class's
+`[TestModule("...")]` name (see `managed/Tests/TestModuleAttribute.cs`)
+gets its own header, and every test's name is written out, flushed, and
+left on screen BEFORE that test runs, with its result appended once known:
 
-- `MessageTests` -- one small, fast, isolated test per `BMessage` Add/Find
-  pair or whole-message operation (see `managed/Tests/MessageTests.cs`).
-  Add a new one here alongside every new `hs_message.h` function.
-- `ApplicationTests` -- the Application Kit threading proof from "The open
-  question" above, as an actual regression test rather than something you
-  verify by eye. Slower and less isolated than a `MessageTests` case (it
-  spins up a real `BApplication` and blocks on a real native message
-  loop), but it belongs in the same suite rather than nowhere.
+```
+== BMessage ==
+  Int8RoundTrips ... PASS
+  Int16RoundTrips ... PASS
+  ...
+
+== Application Kit ==
+  ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
+
+34 passed, 0 failed, 0 errored
+```
+
+That ordering is deliberate: `ApplicationTests` blocks for a moment on a
+real native message loop, so if a future change ever made it hang, you'd
+see its name sitting on screen with no result yet, telling you exactly
+which test to look at, rather than silence until it either finishes or you
+give up waiting.
+
+Pass a substring to run just one module, matched against either the
+`[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
+`mono Tests.exe Message` both run only `MessageTests`. Two modules exist
+today:
+
+- `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
+  `BMessage` Add/Find pair or whole-message operation (see
+  `managed/Tests/MessageTests.cs`). Add a new one here alongside every new
+  `hs_message.h` function.
+- `Application Kit` (class `ApplicationTests`) -- the threading proof from
+  "The open question" above, as an actual regression test rather than
+  something you verify by eye. Slower and less isolated than a
+  `MessageTests` case (it spins up a real `BApplication` and blocks on a
+  real native message loop), but it belongs in the same suite rather than
+  nowhere.
 
 There is no NUnit (or any test framework) anywhere in this Mono 6.14.1
 port's actual installed GAC, and no realistic way to get one: modern
@@ -169,23 +196,25 @@ only NUnit on this machine at all is old 2.6.2 copies buried inside an
 unrelated leftover full Mono source checkout (vendored there just to build
 *Mono's own* Newtonsoft.Json/Cecil test suites) -- not something this
 project should depend on, since it isn't ours and could disappear. Instead,
-`managed/Tests/TestAttribute.cs`/`Assert.cs`/`TestRunner.cs` are a
-deliberately tiny (~150 line), dependency-free framework of our own:
-a `[Test]` attribute, reflection-based discovery, a handful of
-`Assert.AreEqual`/`IsTrue`/`IsNull`/`Fail` helpers, and a runner that
-constructs a fresh instance of the test class per test (so one test can't
-see state another left behind) and reports `PASS`/`FAIL`/`ERROR` per test
-plus a final count. `FAIL` means an `Assert.*` call didn't hold; `ERROR`
-means the test threw something else entirely (a null reference, a native
-crash surfacing as an exception, ...) -- worth keeping visually distinct,
-since those call for different next steps. Same rationale as the
-hand-written shim itself: small enough that every line is understood, and
-guaranteed to compile with `mcs` and run on this exact Mono build since we
-control every line of it.
+`managed/Tests/TestAttribute.cs`/`TestModuleAttribute.cs`/`Assert.cs`/
+`TestRunner.cs` are a deliberately tiny (~180 line), dependency-free
+framework of our own: a `[Test]` attribute, a `[TestModule("...")]`
+class-level attribute for the header/filter name, reflection-based
+discovery, a handful of `Assert.AreEqual`/`IsTrue`/`IsNull`/`Fail` helpers,
+and a runner that constructs a fresh instance of the test class per test
+(so one test can't see state another left behind) and reports
+`PASS`/`FAIL`/`ERROR` per test plus a final count. `FAIL` means an
+`Assert.*` call didn't hold; `ERROR` means the test threw something else
+entirely (a null reference, a native crash surfacing as an exception,
+...) -- worth keeping visually distinct, since those call for different
+next steps. Same rationale as the hand-written shim itself: small enough
+that every line is understood, and guaranteed to compile with `mcs` and
+run on this exact Mono build since we control every line of it.
 
 To add a test: write a public, parameterless, `void`-returning instance
 method tagged `[Test]` on a public class anywhere under `managed/Tests/`
 (a new file per kit, following `MessageTests.cs`/`ApplicationTests.cs`),
+tag the class itself with `[TestModule("...")]` naming the kit it covers,
 throw via one of the `Assert.*` helpers (or `Assert.Fail(...)` directly) to
 report a failure, and rebuild.
 

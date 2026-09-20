@@ -8,6 +8,7 @@ using Haiku.Testing;
 /// method that used to live in Sample/Program.cs. Run with `mono Tests.exe
 /// Message` to run just this class.
 /// </summary>
+[Haiku.Testing.TestModule("BMessage")]
 public class MessageTests
 {
 	private const uint TestWhat = 0x54455354; // 'TEST'
