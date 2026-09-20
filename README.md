@@ -4,6 +4,11 @@ C# bindings for Haiku OS's native BeAPI, for use from the [Mono 6.14.1 port
 to Haiku](https://github.com/jwalds/haikuports) this project
 grew out of. Not affiliated with or endorsed by the Haiku project.
 
+See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for open bugs found on real
+hardware that aren't fixed yet, what's been ruled out for each, and what's
+been tried already -- check there before re-investigating one from
+scratch.
+
 ## Why a hand-written C shim
 
 BeAPI (`libbe.so`) is a pure C++ API: ordinary C++ classes with virtual
@@ -212,6 +217,11 @@ hit them yourself:**
   README has flagged since the Application Kit slice -- but it isn't
   nailed down yet. Treat this as an open item, not a closed one.
 
+**None of this section's two "found empirically" facts are fixed yet --
+see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issues #1 and #2 for the full
+writeup, what's been ruled out, and (for issue #2's suspected root cause)
+a related, also-unresolved investigation in issue #3.**
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -262,6 +272,19 @@ since that quits the app directly rather than going through the window's
 own close-box path. Either way `[1]`/`[2]`/`[4]`/"App exited cleanly" is
 the proof that matters: a real window was created and shown, and the app
 shut down cleanly afterward.)
+
+You may also sometimes see a line like this print *after* "App exited
+cleanly.":
+
+```
+abort_threads: Failed aborting id: 0x9ed12ed000, mono_thread_manage will ignore it
+```
+
+This is a known, non-fatal Mono runtime warning printed during process
+shutdown -- it does not indicate a hang or a failed run. See
+[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #3 for the full root-cause
+writeup (confirmed against the actual mono source) and why the seemingly
+obvious fix for it crashes instead.
 
 ## Testing
 
