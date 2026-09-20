@@ -13,6 +13,7 @@
 #include <Window.h>
 #include <Message.h>
 #include <Rect.h>
+#include <View.h>
 
 
 namespace {
@@ -157,6 +158,26 @@ void hs_window_set_destroyed_callback(hs_handle window,
 	hs_window_destroyed_callback callback, void* user_data)
 {
 	static_cast<HSWindow*>(window)->SetDestroyedCallback(callback, user_data);
+}
+
+
+void hs_window_add_child(hs_handle window, hs_handle view)
+{
+	/* `view` is really an HSView* (see hs_view.cpp), a class this file
+	 * has no definition for -- but HSView derives from BView with plain
+	 * single, non-virtual inheritance and adds no data members ahead of
+	 * that base, so an HSView* and its BView subobject share the same
+	 * address (true for every real Haiku/GCC target this binding builds
+	 * on). Casting the opaque handle straight to BView*, skipping HSView
+	 * entirely, needs no more than that fact and BWindow::AddChild()'s
+	 * own signature (which only ever wants a BView*). */
+	static_cast<HSWindow*>(window)->AddChild(static_cast<BView*>(view));
+}
+
+
+bool hs_window_remove_child(hs_handle window, hs_handle view)
+{
+	return static_cast<HSWindow*>(window)->RemoveChild(static_cast<BView*>(view));
 }
 
 

@@ -177,6 +177,44 @@ namespace Haiku.Interface
 			Native.hs_window_resize_to(_handle, width, height);
 		}
 
+		/// <summary>
+		/// Adds child as a top-level child of this window's own view
+		/// hierarchy -- a BWindow is the root of its own view tree, exactly
+		/// like a BView is the root of its children's (see hs_window.h's own
+		/// hs_window_add_child() doc). OnAttachedToWindow() fires on child
+		/// (and its descendants, if any) synchronously, on whatever thread
+		/// calls this -- even before this window has ever been shown, since
+		/// (unlike a nested View-in-View attachment) a window never itself
+		/// needs to "become attached" to anything first; see hs_window.h's
+		/// own hs_window_add_child() doc for why this is safe pre-Show()
+		/// specifically (no message-loop thread running yet to race with).
+		/// </summary>
+		public void AddChild(View child)
+		{
+			CheckNotConsumed();
+			if (child == null)
+				throw new ArgumentNullException("child");
+			Native.hs_window_add_child(_handle, child._handle);
+			child._hasParent = true;
+		}
+
+		/// <summary>
+		/// Detaches child from this window's child list without deleting it
+		/// -- see hs_view.h's OWNERSHIP note (the same rule applies whether
+		/// a view's parent is a Window or another View). Returns false if
+		/// child was not actually a direct child of this window.
+		/// </summary>
+		public bool RemoveChild(View child)
+		{
+			CheckNotConsumed();
+			if (child == null)
+				throw new ArgumentNullException("child");
+			bool removed = Native.hs_window_remove_child(_handle, child._handle);
+			if (removed)
+				child._hasParent = false;
+			return removed;
+		}
+
 		private void CheckNotConsumed()
 		{
 			if (_handle == IntPtr.Zero)

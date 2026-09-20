@@ -85,30 +85,60 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (just started)
+### Interface Kit (BWindow, and BView's "shell + drawing" slice)
 
-A single first slice: `BWindow`, and only `BWindow` -- no `BView` yet, so
-nothing is drawable or interactive inside the window it shows. This kit
-lives in its own assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll`
-for `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
+Two slices so far: `BWindow` (the first), and now a second, deliberately
+scoped-down slice of `BView` -- construction/geometry, being added to and
+removed from a window's view hierarchy, the `AttachedToWindow`/
+`DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
+the round trip (colors, `FillRect`/`StrokeRect`/`StrokeLine`, `DrawString`).
+Mouse/keyboard input, layout, and `FrameResized`/`FrameMoved` are deferred
+to a follow-up slice -- see "Not yet covered" below. This kit lives in its
+own assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
+`Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
 future kits (Storage, etc.) to also get their own assembly.
 
 - `Haiku.Interface.Window` -- wraps a native `BWindow` subclass
   (`HSWindow`, in `native/`). Override `OnMessageReceived`,
   `OnQuitRequested`, `OnDestroyed`. `Show`/`Hide`/`IsHidden`, `Quit`,
-  `Lock`/`Unlock`/`IsLocked`, `Title`, `Frame`, `MoveTo`, `ResizeTo`. See
-  "BWindow: threading, quitting, and destruction" below before touching
-  `Window.cs` or `hs_window.cpp` -- its lifecycle is shaped differently
-  from `Application`'s in ways that matter.
+  `Lock`/`Unlock`/`IsLocked`, `Title`, `Frame`, `MoveTo`, `ResizeTo`,
+  `AddChild`/`RemoveChild` (a `BWindow` is the root of its own view
+  hierarchy, exactly like a `BView` is the root of its children's -- see
+  `hs_window.h`'s own `hs_window_add_child()` doc). See "BWindow:
+  threading, quitting, and destruction" below before touching `Window.cs`
+  or `hs_window.cpp` -- its lifecycle is shaped differently from
+  `Application`'s in ways that matter.
 - `Haiku.Interface.WindowLook`/`WindowFeel`/`WindowFlags` -- Haiku's own
   `window_look`/`window_feel`/flags enums, values copied verbatim from
   `headers/os/interface/Window.h`.
+- `Haiku.Interface.View` -- wraps a native `BView` subclass (`HSView`, in
+  `native/`). Override `OnAttachedToWindow`, `OnDetachedFromWindow`,
+  `OnDraw`, `OnDestroyed`. `AddChild`/`RemoveChild` (nested views),
+  `Frame`/`Bounds`, `MoveTo`/`ResizeTo`, `SetHighColor`/`SetLowColor`/
+  `SetViewColor`, `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`. See
+  "BView: no thread of its own, and stricter ownership" below before
+  touching `View.cs` or `hs_view.cpp` -- and see
+  [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding an automated
+  test that polls for `Draw()` firing from a thread other than the one
+  running `Application.Run()`.
+- `Haiku.Interface.ViewFlags` -- Haiku's `B_WILL_DRAW`/`B_FRAME_EVENTS`/...
+  bitmask, values copied verbatim from `headers/os/interface/View.h` (a
+  real `[Flags]` enum -- these are independent bits).
+- `Haiku.Interface.ViewResizingMode` -- Haiku's `B_FOLLOW_*` constants.
+  Deliberately NOT a `[Flags]` enum, unlike `ViewFlags` above: these are
+  macro-computed in `View.h` (a `_rule_(...)` macro), not independent bits
+  -- `B_FOLLOW_ALL` is not simply `Left | Right | Top | Bottom` OR'd
+  together. Every value here was verified against a small native scratch
+  program compiled and run on real Haiku hardware, not hand-computed from
+  the macro, per this project's "verify, don't assume" rule.
 
-Not yet covered: `BView` and everything under it (so: no drawing, no
-controls, no mouse/keyboard input, no layout) -- deliberately deferred to
-its own follow-up slice rather than folded into this one, per the
-BWindow-first scoping decision this slice started from. Also not yet
+Not yet covered: everything else under `BView` -- mouse/keyboard input,
+`FrameResized`/`FrameMoved`, layout, scrolling, fonts beyond the current
+default, custom drawing patterns (`FillRect`/`StrokeRect`/`StrokeLine`
+always use `B_SOLID_HIGH`; see `hs_view.h`'s DRAWING note), and
+`AddChild`'s `before` (insert position) parameter -- deliberately deferred
+to a follow-up slice rather than folded into this one. Also not yet
 covered: everything else in Interface Kit (~50 other classes), `BScreen`,
 `BDirectWindow`.
 
@@ -222,6 +252,58 @@ see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issues #1 and #2 for the full
 writeup, what's been ruled out, and (for issue #2's suspected root cause)
 a related, also-unresolved investigation in issue #3.**
 
+## BView: no thread of its own, and stricter ownership
+
+`BView` looked at first like it would need the same threading analysis as
+`BWindow` above. It doesn't, for a simpler reason: **a `BView` never spawns
+anything of its own.** Every hook (`AttachedToWindow`, `DetachedFromWindow`,
+`Draw`) fires on whichever thread is running the OWNING WINDOW's message
+loop -- the same thread `Window`'s own callbacks already fire on -- and the
+Haiku Book says app_server automatically locks that `BWindow` before
+calling any hook method, so there's no separate locking story to work out
+here. A view that hasn't been added to a window yet (or whose window has
+never been shown) has no thread delivering anything to it at all, exactly
+like a freshly-constructed, not-yet-shown `Window` -- safe to configure
+(`MoveTo`, `SetHighColor`, ...) right after construction, on whatever
+thread created it.
+
+Two things ARE specific to `BView`, both shaped by the same "no hook for
+about-to-be-deleted" gap `BWindow`'s own destroyed-callback works around:
+
+1. **`AddChild()`/`RemoveChild()` exist on both `Window` and `View`** -- a
+   window is the root of its own view hierarchy, exactly like a view is the
+   root of its nested children's (confirmed directly from `Window.h`/
+   `View.h`, not assumed). `AttachedToWindow()` fires **synchronously**, on
+   whatever thread calls `AddChild()`, even before the window has ever been
+   shown -- see `hs_window.h`'s own `hs_window_add_child()` doc for why
+   that's safe pre-`Show()` specifically (no thread running yet to race
+   with).
+2. **`Dispose()` is stricter than `Window.Dispose()`.** A `BWindow` shown or
+   not, `Window.cs` can always pick a safe teardown path automatically. A
+   still-attached `View` has no such fallback -- deleting it directly while
+   its parent still references it would leave a dangling pointer in that
+   parent's child list, and unlike `Window`, there's no native-side
+   rejection of the mistake to lean on. `View.Dispose()` tracks whether it's
+   currently attached and **throws `InvalidOperationException`** rather
+   than risk it, instead of silently doing the wrong thing. `RemoveChild()`
+   it from its parent first, or just let the parent's own destruction
+   cascade-destroy it (see `hs_view.h`'s OWNERSHIP note for the three death
+   paths this covers with one `OnDestroyed` hook: explicit `Dispose()`,
+   explicit detach-then-dispose, and the implicit cascade).
+
+**A real, currently-open question about `Draw()` and threading was found
+while building this slice -- see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue
+#4.** Short version: one specific automated-test shape (showing a window
+from a thread other than the one running `Application.Run()`, with
+`Application` never `Run()` at all, then polling for `Draw()` from that
+same outside thread) reliably hung the whole test process the first time
+`Draw()` fired, for reasons not yet root-caused. Real app usage -- window
+and view built inside `OnReadyToRun()`, same thread that calls `Run()` --
+was separately confirmed NOT to hit this: see `managed/Sample/Program.cs`'s
+`DemoView`, verified both by console output and by an actual screenshot of
+its drawn content. Read issue #4 in full before adding a `Draw()`-firing
+automated test back to `ViewTests.cs`.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -253,25 +335,38 @@ needs. Spelling out the full path explicitly works the same whether you are
 sitting at Haiku's own Terminal or running this over SSH.)
 
 `Sample.exe` is now a small windowed app (see `managed/Sample/Program.cs`):
-it shows a real `BWindow` and waits for you to close it (its title bar's
-close box), at which point `WindowFlags.QuitOnWindowClose` signals the
-owning `BApplication` to quit too. Expected output:
+it shows a real `BWindow` containing a `DemoView` that actually draws
+something (a filled/stroked rect and a line of text, via real `BeAPI`
+calls), and waits for you to close it (its title bar's close box), at which
+point `WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to
+quit too. Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
-[2] Window shown -- close it (its title bar's close box) to quit.
-[4] Application OnQuitRequested fired -- allowing shutdown.
+[2] DemoView attached to its window.
+[2b] Window shown -- close it (its title bar's close box) to quit.
+[3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
+[5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
 ```
 
-(`[3]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
+(`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
 close it via its own close box, but not necessarily if the application is
 asked to quit some other way, e.g. `hey <signature> QUIT` from a shell,
 since that quits the app directly rather than going through the window's
-own close-box path. Either way `[1]`/`[2]`/`[4]`/"App exited cleanly" is
-the proof that matters: a real window was created and shown, and the app
-shut down cleanly afterward.)
+own close-box path. Either way `[1]`/`[2]`/`[2b]`/`[3]`/`[5]`/"App exited
+cleanly" is the proof that matters: a real window was created and shown, a
+real view inside it actually drew something -- confirmed not just from this
+log but from an actual `screenshot -s` of the running app during this
+slice's development -- and the app shut down cleanly afterward.
+
+If the window appears but stays entirely black (no fill color, no text) and
+`[3]` never prints, that's very likely Haiku's own `screen_blanker`
+(screensaver) covering the window rather than a bug in this binding -- see
+[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 for how that red herring was
+found and ruled out. Move the mouse or kill `screen_blanker` and try again
+before assuming `Draw()` itself is broken.)
 
 You may also sometimes see a line like this print *after* "App exited
 cleanly.":
@@ -308,13 +403,18 @@ left on screen BEFORE that test runs, with its result appended once known:
   Int16RoundTrips ... PASS
   ...
 
+== BView ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  AddChildFiresAttachedToWindowSynchronously ... PASS
+  ...
+
 == Interface Kit ==
   QuitPostsRequestAndFiresDestroyedCallback ... PASS
 
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-35 passed, 0 failed, 0 errored
+41 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -335,13 +435,21 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Three modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Four modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
   `BMessage` Add/Find pair or whole-message operation (see
   `managed/Tests/MessageTests.cs`). Add a new one here alongside every new
   `hs_message.h` function.
+- `BView` (class `ViewTests`) -- construction/geometry, `AddChild`/
+  `RemoveChild` and the attach/detach hooks they fire, and the ownership
+  rules `Dispose()` enforces (see `managed/Tests/ViewTests.cs`). Every test
+  here uses an unshown `Window` (see "BView" above for why that's enough to
+  exercise `AttachedToWindow`/`DetachedFromWindow`). Deliberately does NOT
+  include an automated `Draw()`-firing test -- read that file's class
+  remarks and [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding
+  one back.
 - `Interface Kit` (class `WindowTests`) -- `BWindow`'s `Quit()`/
   `OnDestroyed()` lifecycle (see `managed/Tests/WindowTests.cs`), including
   the poll-with-timeout pattern needed because there's no blocking
@@ -450,18 +558,26 @@ design of its own).
 
 ## Adding a new kit
 
-Follow `hs_application.h`/`.cpp` (or now, `hs_window.h`/`.cpp`, which
-followed that same template while adding its own destroyed-callback and
-posted-quit patterns -- see "BWindow" above) for any class you need to let
+Follow `hs_application.h`/`.cpp` (or `hs_window.h`/`.cpp`, which followed
+that same template while adding its own destroyed-callback and posted-quit
+patterns -- see "BWindow" above; or now `hs_view.h`/`.cpp`, which reused
+`hs_window.h`'s destroyed-callback pattern again while adding its own
+stricter ownership rule -- see "BView" above) for any class you need to let
 C# subclass/override: one native C++ subclass per base class, one
 callback-typedef + setter per virtual you expose, name the delegates with
-a prefix specific to that class (`Window*Callback`, not just
-`*Callback`) so two kits' similarly-named virtuals never collide in the
-same namespace. For classes nobody needs to override (most of Interface
-Kit's ~50 remaining classes, like most of Application Kit's, are plain
-data or widget wrappers), a much simpler shim — direct property/method
-wrapping with no callback machinery — is all that's needed;
-`hs_message.cpp` is the template for that simpler shape.
+a prefix specific to that class (`Window*Callback`, `View*Callback`, not
+just `*Callback`) so two kits' similarly-named virtuals never collide in
+the same namespace. When two classes in the same kit both need the same
+operation (e.g. `Window`/`View` both needing `AddChild`/`RemoveChild`,
+since a window is the root of its own view hierarchy just like a view is
+the root of its nested children's), give each its own
+`hs_<class>_add_child()`/`hs_<class>_remove_child()` pair rather than
+trying to share one -- see `hs_window.h`/`hs_view.h`'s own pair for the
+template. For classes nobody needs to override (most of Interface Kit's
+~50 remaining classes, like most of Application Kit's, are plain data or
+widget wrappers), a much simpler shim — direct property/method wrapping
+with no callback machinery — is all that's needed; `hs_message.cpp` is the
+template for that simpler shape.
 
 A kit that needs to let C# subclass/override anything gets its own
 managed assembly (see `Haiku.Interface.dll`, referencing `Haiku.App.dll`

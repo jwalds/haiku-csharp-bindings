@@ -146,6 +146,21 @@ void hs_window_set_destroyed_callback(hs_handle window,
  * loop thread and unlocks it -- see the threading note above. Safe to
  * call more than once (matches BWindow::Show()'s own show/hide counter
  * semantics). */
+/* Adds child to the end of the window's top-level child list -- a window
+ * acts as the root of its own view hierarchy, exactly like a BView would
+ * for a nested child (see hs_view.h's own hs_view_add_child(), and its
+ * DRAWING note for why `before` isn't exposed). AttachedToWindow() fires
+ * on child (and its descendants) immediately, on whatever thread calls
+ * this -- before the window has necessarily been shown, if it hasn't
+ * been yet (see the THREAD note above: with no thread running yet, there
+ * is nothing to race with). */
+void hs_window_add_child(hs_handle window, hs_handle view);
+
+/* Detaches view from the window without deleting it -- see hs_view.h's
+ * OWNERSHIP note. Returns false if view was not actually a child of this
+ * window. */
+bool hs_window_remove_child(hs_handle window, hs_handle view);
+
 void hs_window_show(hs_handle window);
 void hs_window_hide(hs_handle window);
 bool hs_window_is_hidden(hs_handle window);

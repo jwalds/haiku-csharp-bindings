@@ -19,6 +19,18 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void WindowDestroyedCallback(IntPtr userData);
 
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewAttachedToWindowCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewDetachedFromWindowCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewDrawCallback(IntPtr userData, HsRect updateRect);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -35,6 +47,15 @@ namespace Haiku.Interface
 		internal float Top;
 		internal float Right;
 		internal float Bottom;
+	}
+
+	/* Mirrors hs_point (see native/include/hs_types.h) exactly. Same
+	 * duplicate-rather-than-InternalsVisibleTo rationale as HsRect above. */
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct HsPoint
+	{
+		internal float X;
+		internal float Y;
 	}
 
 	/* Raw P/Invoke surface for hs_window.h. Nothing here is meant to be
@@ -108,5 +129,80 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern void hs_window_resize_to(IntPtr window, float width, float height);
+
+		[DllImport(Lib)]
+		internal static extern void hs_window_add_child(IntPtr window, IntPtr view);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_window_remove_child(IntPtr window, IntPtr view);
+
+		/* Raw P/Invoke surface for hs_view.h -- View.cs wraps every one of
+		 * these, same as Window.cs does for the functions above. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_view_create(HsRect frame, string name,
+			uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_destroy(IntPtr view);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_attached_to_window_callback(IntPtr view,
+			ViewAttachedToWindowCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_detached_from_window_callback(IntPtr view,
+			ViewDetachedFromWindowCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_draw_callback(IntPtr view,
+			ViewDrawCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_destroyed_callback(IntPtr view,
+			ViewDestroyedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_add_child(IntPtr view, IntPtr child);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_view_remove_child(IntPtr view, IntPtr child);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_get_frame(IntPtr view, out HsRect outFrame);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_get_bounds(IntPtr view, out HsRect outBounds);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_move_to(IntPtr view, float x, float y);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_resize_to(IntPtr view, float width, float height);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_high_color(IntPtr view,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_low_color(IntPtr view,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_view_color(IntPtr view,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_fill_rect(IntPtr view, HsRect rect);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_stroke_rect(IntPtr view, HsRect rect);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_stroke_line(IntPtr view, HsPoint start, HsPoint end);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_draw_string(IntPtr view, string text, HsPoint location);
 	}
 }
