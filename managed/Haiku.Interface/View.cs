@@ -41,6 +41,11 @@ namespace Haiku.Interface
 		private readonly ViewDetachedFromWindowCallback _detachedFromWindowThunk;
 		private readonly ViewDrawCallback _drawThunk;
 		private readonly ViewDestroyedCallback _destroyedThunk;
+		private readonly ViewMouseDownCallback _mouseDownThunk;
+		private readonly ViewMouseUpCallback _mouseUpThunk;
+		private readonly ViewMouseMovedCallback _mouseMovedThunk;
+		private readonly ViewKeyDownCallback _keyDownThunk;
+		private readonly ViewKeyUpCallback _keyUpThunk;
 
 		/// <summary>
 		/// Convenience overload for the common case: a plain view you're
@@ -74,11 +79,21 @@ namespace Haiku.Interface
 			_detachedFromWindowThunk = DetachedFromWindowThunk;
 			_drawThunk = DrawThunk;
 			_destroyedThunk = DestroyedThunk;
+			_mouseDownThunk = MouseDownThunk;
+			_mouseUpThunk = MouseUpThunk;
+			_mouseMovedThunk = MouseMovedThunk;
+			_keyDownThunk = KeyDownThunk;
+			_keyUpThunk = KeyUpThunk;
 
 			Native.hs_view_set_attached_to_window_callback(_handle, _attachedToWindowThunk, userData);
 			Native.hs_view_set_detached_from_window_callback(_handle, _detachedFromWindowThunk, userData);
 			Native.hs_view_set_draw_callback(_handle, _drawThunk, userData);
 			Native.hs_view_set_destroyed_callback(_handle, _destroyedThunk, userData);
+			Native.hs_view_set_mouse_down_callback(_handle, _mouseDownThunk, userData);
+			Native.hs_view_set_mouse_up_callback(_handle, _mouseUpThunk, userData);
+			Native.hs_view_set_mouse_moved_callback(_handle, _mouseMovedThunk, userData);
+			Native.hs_view_set_key_down_callback(_handle, _keyDownThunk, userData);
+			Native.hs_view_set_key_up_callback(_handle, _keyUpThunk, userData);
 		}
 
 		/// <summary>Called on the owning window's thread once this view becomes part of a window's hierarchy. Default: does nothing.</summary>
@@ -99,6 +114,48 @@ namespace Haiku.Interface
 		/// nothing.
 		/// </summary>
 		protected virtual void OnDestroyed() { }
+
+		/// <summary>
+		/// Called on the owning window's thread when a mouse button is
+		/// pressed while the pointer is over this view. <paramref
+		/// name="buttons"/> is the full set of buttons down at that instant
+		/// (see <see cref="MouseButtons"/>), not just the one that triggered
+		/// this event. Default: does nothing.
+		/// </summary>
+		protected virtual void OnMouseDown(Point where, MouseButtons buttons) { }
+
+		/// <summary>
+		/// Called on the owning window's thread when a mouse button is
+		/// released while the pointer is over this view. Unlike <see
+		/// cref="OnMouseDown"/> and <see cref="OnMouseMoved"/>, there is no
+		/// buttons parameter here -- B_MOUSE_UP messages carry no "buttons"
+		/// field at all (verified against the Be Book's message-constants
+		/// documentation, not assumed; see hs_view.h's MOUSE AND KEYBOARD
+		/// INPUT note). Default: does nothing.
+		/// </summary>
+		protected virtual void OnMouseUp(Point where) { }
+
+		/// <summary>
+		/// Called on the owning window's thread whenever the mouse moves
+		/// over this view, including entering/exiting it (see <paramref
+		/// name="transit"/>). <paramref name="buttons"/> is whatever buttons
+		/// are currently down (commonly none, for a plain hover). Default:
+		/// does nothing.
+		/// </summary>
+		protected virtual void OnMouseMoved(Point where, MouseTransit transit, MouseButtons buttons) { }
+
+		/// <summary>
+		/// Called on the owning window's thread when a key is pressed while
+		/// this view <see cref="IsFocus"/>. <paramref name="bytes"/> is the
+		/// raw byte sequence Haiku delivered (already copied out of the
+		/// native borrowed pointer) -- see <see cref="KeyBytes"/> for the
+		/// common single-byte control characters, e.g. Escape/Backspace/the
+		/// arrow keys. Default: does nothing.
+		/// </summary>
+		protected virtual void OnKeyDown(byte[] bytes) { }
+
+		/// <summary>Called on the owning window's thread when a key is released while this view <see cref="IsFocus"/>. Same <paramref name="bytes"/> semantics as <see cref="OnKeyDown"/>. Default: does nothing.</summary>
+		protected virtual void OnKeyUp(byte[] bytes) { }
 
 		/// <summary>
 		/// Adds child to the end of this view's child list. See
@@ -211,6 +268,46 @@ namespace Haiku.Interface
 			Native.hs_view_draw_string(_handle, text, ToHsPoint(location));
 		}
 
+		/// <summary>
+		/// Gives this view keyboard focus (or takes it away, if focus is
+		/// false) so it starts (or stops) receiving <see cref="OnKeyDown"/>/
+		/// <see cref="OnKeyUp"/>. Works regardless of <see cref="ViewFlags"/>
+		/// -- B_NAVIGABLE only affects Tab-key auto-cycling between views,
+		/// not whether MakeFocus(true) works when called directly (verified
+		/// against View.h, not assumed; see hs_view.h's MOUSE AND KEYBOARD
+		/// INPUT note). Only meaningful once this view is attached to a
+		/// window.
+		/// </summary>
+		public void MakeFocus(bool focus = true)
+		{
+			CheckNotConsumed();
+			Native.hs_view_make_focus(_handle, focus);
+		}
+
+		/// <summary>Whether this view currently has keyboard focus. See <see cref="MakeFocus"/>.</summary>
+		public bool IsFocus
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_view_is_focus(_handle);
+			}
+		}
+
+		/// <summary>
+		/// Asks the app_server to redraw this view's entire bounds, causing
+		/// <see cref="OnDraw"/> to fire again soon (on the owning window's
+		/// thread, per the usual rule) -- not a synchronous, wrong on the
+		/// spot repaint. Not part of the BeAPI's own minimal View slice, but
+		/// added here so a mouse/keyboard-driven view (this input slice's
+		/// whole point) has some way to make what it drew last time stale.
+		/// </summary>
+		public void Invalidate()
+		{
+			CheckNotConsumed();
+			Native.hs_view_invalidate(_handle);
+		}
+
 		private static HsRect ToHsRect(Rect rect)
 		{
 			return new HsRect { Left = rect.Left, Top = rect.Top, Right = rect.Right, Bottom = rect.Bottom };
@@ -219,6 +316,11 @@ namespace Haiku.Interface
 		private static HsPoint ToHsPoint(Point point)
 		{
 			return new HsPoint { X = point.X, Y = point.Y };
+		}
+
+		private static Point FromHsPoint(HsPoint point)
+		{
+			return new Point(point.X, point.Y);
 		}
 
 		private void CheckNotConsumed()
@@ -247,6 +349,43 @@ namespace Haiku.Interface
 		{
 			View view = FromUserData(userData);
 			view.OnDraw(new Rect(updateRect.Left, updateRect.Top, updateRect.Right, updateRect.Bottom));
+		}
+
+		private static void MouseDownThunk(IntPtr userData, HsPoint where, uint buttons)
+		{
+			FromUserData(userData).OnMouseDown(FromHsPoint(where), (MouseButtons)buttons);
+		}
+
+		private static void MouseUpThunk(IntPtr userData, HsPoint where)
+		{
+			FromUserData(userData).OnMouseUp(FromHsPoint(where));
+		}
+
+		private static void MouseMovedThunk(IntPtr userData, HsPoint where, uint transit, uint buttons)
+		{
+			FromUserData(userData).OnMouseMoved(FromHsPoint(where), (MouseTransit)transit, (MouseButtons)buttons);
+		}
+
+		// bytes is a borrowed pointer (see hs_view.h's MOUSE AND KEYBOARD
+		// INPUT note) -- copied into a managed byte[] immediately via
+		// Marshal.Copy, same borrowed-pointer-copy-immediately convention
+		// used elsewhere in this binding (e.g. Message.FindString).
+		private static void KeyDownThunk(IntPtr userData, IntPtr bytes, int numBytes)
+		{
+			FromUserData(userData).OnKeyDown(CopyBytes(bytes, numBytes));
+		}
+
+		private static void KeyUpThunk(IntPtr userData, IntPtr bytes, int numBytes)
+		{
+			FromUserData(userData).OnKeyUp(CopyBytes(bytes, numBytes));
+		}
+
+		private static byte[] CopyBytes(IntPtr source, int length)
+		{
+			byte[] result = new byte[length];
+			if (length > 0)
+				Marshal.Copy(source, result, 0, length);
+			return result;
 		}
 
 		private static void DestroyedThunk(IntPtr userData)

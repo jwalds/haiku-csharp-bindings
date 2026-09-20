@@ -1,18 +1,23 @@
 using System;
+using System.Text;
 using Haiku.App;
 using Haiku.Interface;
 
 /*
  * A minimal, runnable example of this binding's Interface Kit slice: a
  * BWindow you can actually see and close, containing a BView that actually
- * draws something. This is NOT where verification of the binding lives --
- * see managed/Tests/ (built as Tests.exe) for the actual regression suite,
- * including WindowTests.QuitPostsRequestAndFiresDestroyedCallback and
- * ViewTests' construction/attach/detach/ownership coverage, which exercise
- * these same paths without needing a human to look at anything. This file
- * exists purely to be a clear, working starting point for your own
- * windowed app, and -- for DemoView specifically -- to answer a real open
- * question: see DemoView's own remarks below.
+ * draws something and now also responds to mouse and keyboard input. This
+ * is NOT where verification of the binding lives -- see managed/Tests/
+ * (built as Tests.exe) for the actual regression suite, including
+ * WindowTests.QuitPostsRequestAndFiresDestroyedCallback, ViewTests'
+ * construction/attach/detach/ownership coverage, and ViewInputTests'
+ * MakeFocus/IsFocus/Invalidate/enum-value coverage, which exercise these
+ * same paths without needing a human to look at anything (real hook-firing
+ * itself has no automated coverage -- see ViewInputTests.cs's class
+ * remarks for why, same reasoning as Draw() itself in KNOWN_ISSUES.md
+ * issue #4). This file exists purely to be a clear, working starting point
+ * for your own windowed app, and -- for DemoView specifically -- to answer
+ * a real open question: see DemoView's OnDraw remarks below.
  *
  * DemoWindow uses WindowFlags.QuitOnWindowClose, so clicking its title bar's
  * close box doesn't just end the window -- BWindow.h's own flag semantics
@@ -22,6 +27,16 @@ using Haiku.Interface;
  */
 public class DemoView : View
 {
+	// State captured from the input hooks below, redrawn by OnDraw. All of
+	// this is only ever touched from the owning window's message-loop
+	// thread -- the same thread that fires these hooks and OnDraw itself
+	// (see hs_view.h's threading note) -- so no locking is needed here.
+	private string _lastEvent = "(none yet -- move the mouse over this view, click, or type)";
+	private Point _lastMousePos;
+	private MouseButtons _lastButtons;
+	private string _lastKeyDown = "(none yet)";
+	private string _lastKeyUp = "(none yet)";
+
 	public DemoView()
 		: base(new Rect(20, 20, 380, 210), "demo view")
 	{
@@ -30,6 +45,67 @@ public class DemoView : View
 	protected override void OnAttachedToWindow()
 	{
 		Console.WriteLine("[2] DemoView attached to its window.");
+
+		// Give this view keyboard focus right away, so OnKeyDown/OnKeyUp
+		// fire without requiring a click first -- verified against View.h
+		// that MakeFocus works regardless of ViewFlags/B_NAVIGABLE (see
+		// hs_view.h's MOUSE AND KEYBOARD INPUT note); safe to call here
+		// since AttachedToWindow already fires on the window's own thread
+		// with the view fully attached.
+		MakeFocus(true);
+	}
+
+	protected override void OnMouseDown(Point where, MouseButtons buttons)
+	{
+		_lastEvent = "MouseDown at " + Describe(where) + ", buttons=" + buttons;
+		_lastMousePos = where;
+		_lastButtons = buttons;
+		Console.WriteLine("[6] " + _lastEvent);
+		Invalidate();
+	}
+
+	protected override void OnMouseUp(Point where)
+	{
+		// No buttons parameter here -- B_MOUSE_UP carries no "buttons"
+		// field, unlike B_MOUSE_DOWN/B_MOUSE_MOVED (verified against the
+		// Be Book's message-constants docs, not assumed; see hs_view.h).
+		_lastEvent = "MouseUp at " + Describe(where);
+		_lastMousePos = where;
+		_lastButtons = MouseButtons.None;
+		Console.WriteLine("[6] " + _lastEvent);
+		Invalidate();
+	}
+
+	protected override void OnMouseMoved(Point where, MouseTransit transit, MouseButtons buttons)
+	{
+		_lastMousePos = where;
+		_lastButtons = buttons;
+
+		// Only log the Entered/Exited transitions to the console -- plain
+		// in-view movement fires this hook continuously and would flood
+		// stdout, but the view still redraws every time so the on-screen
+		// position tracks the pointer live.
+		if (transit == MouseTransit.Entered || transit == MouseTransit.Exited) {
+			_lastEvent = "MouseMoved (" + transit + ") at " + Describe(where);
+			Console.WriteLine("[6] " + _lastEvent);
+		} else {
+			_lastEvent = "MouseMoved at " + Describe(where);
+		}
+		Invalidate();
+	}
+
+	protected override void OnKeyDown(byte[] bytes)
+	{
+		_lastKeyDown = Describe(bytes);
+		Console.WriteLine("[6] KeyDown: " + _lastKeyDown);
+		Invalidate();
+	}
+
+	protected override void OnKeyUp(byte[] bytes)
+	{
+		_lastKeyUp = Describe(bytes);
+		Console.WriteLine("[6] KeyUp: " + _lastKeyUp);
+		Invalidate();
 	}
 
 	/*
@@ -67,6 +143,68 @@ public class DemoView : View
 		SetHighColor(new RgbColor(0, 0, 0));
 		DrawString("Hello from a C# BView, drawn by real BeAPI calls.", new Point(10, 20));
 		StrokeLine(new Point(10, 30), new Point(Bounds.Right - 10, 30));
+
+		// Mouse/keyboard input slice: redraw whatever the hooks above last
+		// captured, so moving the mouse, clicking, and typing all show up
+		// here live (each hook calls Invalidate() to trigger this).
+		DrawString("Last event: " + _lastEvent, new Point(10, 50));
+		DrawString("Mouse position: " + Describe(_lastMousePos) + "   Buttons down: " + _lastButtons,
+			new Point(10, 68));
+		DrawString("Last key down: " + _lastKeyDown, new Point(10, 86));
+		DrawString("Last key up: " + _lastKeyUp, new Point(10, 104));
+		DrawString("(this view has keyboard focus -- just type)", new Point(10, 130));
+	}
+
+	private static string Describe(Point point)
+	{
+		return "(" + point.X + ", " + point.Y + ")";
+	}
+
+	// Turns a raw KeyDown/KeyUp byte sequence into something readable:
+	// the friendly name for a single-byte control character we know about
+	// (see KeyBytes.cs), the literal character for anything printable, or
+	// a hex dump otherwise. Deliberately does not attempt function-key
+	// (F1-F12) identification -- that needs the raw message fields, out of
+	// scope for this basic-hooks slice (see hs_view.h's MOUSE AND KEYBOARD
+	// INPUT note).
+	private static string Describe(byte[] bytes)
+	{
+		if (bytes.Length == 1) {
+			byte b = bytes[0];
+			string name = NameForControlByte(b);
+			if (name != null)
+				return name + " (0x" + b.ToString("x2") + ")";
+			if (b >= 0x20 && b < 0x7f)
+				return "'" + (char)b + "'";
+		}
+
+		StringBuilder hex = new StringBuilder();
+		foreach (byte b in bytes) {
+			if (hex.Length > 0)
+				hex.Append(' ');
+			hex.Append("0x").Append(b.ToString("x2"));
+		}
+		return hex.Length > 0 ? hex.ToString() : "(empty)";
+	}
+
+	private static string NameForControlByte(byte b)
+	{
+		if (b == KeyBytes.Home) return "Home";
+		if (b == KeyBytes.End) return "End";
+		if (b == KeyBytes.Insert) return "Insert";
+		if (b == KeyBytes.Backspace) return "Backspace";
+		if (b == KeyBytes.Tab) return "Tab";
+		if (b == KeyBytes.Return) return "Return/Enter";
+		if (b == KeyBytes.PageUp) return "PageUp";
+		if (b == KeyBytes.PageDown) return "PageDown";
+		if (b == KeyBytes.Escape) return "Escape";
+		if (b == KeyBytes.LeftArrow) return "LeftArrow";
+		if (b == KeyBytes.RightArrow) return "RightArrow";
+		if (b == KeyBytes.UpArrow) return "UpArrow";
+		if (b == KeyBytes.DownArrow) return "DownArrow";
+		if (b == KeyBytes.Space) return "Space";
+		if (b == KeyBytes.Delete) return "Delete";
+		return null;
 	}
 }
 
@@ -96,7 +234,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it or type, close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()

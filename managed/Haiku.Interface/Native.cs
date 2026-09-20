@@ -31,6 +31,29 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ViewDestroyedCallback(IntPtr userData);
 
+	/* Mouse/keyboard delegate shapes matching hs_view.h's callback typedefs
+	 * exactly. MouseUp deliberately has no buttons parameter -- B_MOUSE_UP
+	 * messages do not carry a "buttons" field at all (verified against the
+	 * Be Book's message-constants documentation, not assumed; see the
+	 * MOUSE AND KEYBOARD INPUT note in hs_view.h), unlike MouseDown and
+	 * MouseMoved which both do. `bytes` is a borrowed pointer -- View.cs
+	 * must copy it into a managed byte[] before returning from the
+	 * callback, same rule as any other borrowed pointer in this binding. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewMouseDownCallback(IntPtr userData, HsPoint where, uint buttons);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewMouseUpCallback(IntPtr userData, HsPoint where);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewMouseMovedCallback(IntPtr userData, HsPoint where, uint transit, uint buttons);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewKeyDownCallback(IntPtr userData, IntPtr bytes, int numBytes);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ViewKeyUpCallback(IntPtr userData, IntPtr bytes, int numBytes);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -204,5 +227,41 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern void hs_view_draw_string(IntPtr view, string text, HsPoint location);
+
+		/* Mouse/keyboard/focus/invalidate P/Invoke surface -- see hs_view.h's
+		 * MOUSE AND KEYBOARD INPUT note for the verified semantics behind
+		 * each of these (buttons bitmask values, transit codes, the
+		 * MouseUp buttons asymmetry, KeyDown/KeyUp bytes semantics, and
+		 * MakeFocus/B_NAVIGABLE independence). */
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_mouse_down_callback(IntPtr view,
+			ViewMouseDownCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_mouse_up_callback(IntPtr view,
+			ViewMouseUpCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_mouse_moved_callback(IntPtr view,
+			ViewMouseMovedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_key_down_callback(IntPtr view,
+			ViewKeyDownCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_set_key_up_callback(IntPtr view,
+			ViewKeyUpCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_invalidate(IntPtr view);
+
+		[DllImport(Lib)]
+		internal static extern void hs_view_make_focus(IntPtr view,
+			[MarshalAs(UnmanagedType.I1)] bool focus);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_view_is_focus(IntPtr view);
 	}
 }

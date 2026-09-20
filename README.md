@@ -85,16 +85,19 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, and BView's "shell + drawing" slice)
+### Interface Kit (BWindow, and BView's "shell + drawing + basic input" slices)
 
-Two slices so far: `BWindow` (the first), and now a second, deliberately
+Three slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
-the round trip (colors, `FillRect`/`StrokeRect`/`StrokeLine`, `DrawString`).
-Mouse/keyboard input, layout, and `FrameResized`/`FrameMoved` are deferred
-to a follow-up slice -- see "Not yet covered" below. This kit lives in its
-own assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
+the round trip (colors, `FillRect`/`StrokeRect`/`StrokeLine`, `DrawString`)
+-- and now a third: basic mouse/keyboard input on top of that same `BView`
+(`MouseDown`/`MouseUp`/`MouseMoved`, `KeyDown`/`KeyUp`, `MakeFocus`/
+`IsFocus`). Modifier keys, `GetMouse()` polling, drag & drop, and
+layout/`FrameResized`/`FrameMoved` are deferred to a follow-up slice -- see
+"Not yet covered" below. This kit lives in its own assembly,
+`Haiku.Interface.dll` (referencing `Haiku.App.dll` for
 `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
 future kits (Storage, etc.) to also get their own assembly.
@@ -114,14 +117,17 @@ future kits (Storage, etc.) to also get their own assembly.
   `headers/os/interface/Window.h`.
 - `Haiku.Interface.View` -- wraps a native `BView` subclass (`HSView`, in
   `native/`). Override `OnAttachedToWindow`, `OnDetachedFromWindow`,
-  `OnDraw`, `OnDestroyed`. `AddChild`/`RemoveChild` (nested views),
+  `OnDraw`, `OnDestroyed`, `OnMouseDown`/`OnMouseUp`/`OnMouseMoved`,
+  `OnKeyDown`/`OnKeyUp`. `AddChild`/`RemoveChild` (nested views),
   `Frame`/`Bounds`, `MoveTo`/`ResizeTo`, `SetHighColor`/`SetLowColor`/
-  `SetViewColor`, `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`. See
-  "BView: no thread of its own, and stricter ownership" below before
-  touching `View.cs` or `hs_view.cpp` -- and see
+  `SetViewColor`, `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`,
+  `MakeFocus`/`IsFocus`, `Invalidate`. See "BView: no thread of its own,
+  and stricter ownership" and "BView input" below before touching
+  `View.cs` or `hs_view.cpp` -- and see
   [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding an automated
-  test that polls for `Draw()` firing from a thread other than the one
-  running `Application.Run()`.
+  test that polls for `Draw()` (or, by the same reasoning, a mouse/
+  keyboard hook) firing from a thread other than the one running
+  `Application.Run()`.
 - `Haiku.Interface.ViewFlags` -- Haiku's `B_WILL_DRAW`/`B_FRAME_EVENTS`/...
   bitmask, values copied verbatim from `headers/os/interface/View.h` (a
   real `[Flags]` enum -- these are independent bits).
@@ -132,15 +138,30 @@ future kits (Storage, etc.) to also get their own assembly.
   together. Every value here was verified against a small native scratch
   program compiled and run on real Haiku hardware, not hand-computed from
   the macro, per this project's "verify, don't assume" rule.
+- `Haiku.Interface.MouseButtons` -- Haiku's `B_PRIMARY_MOUSE_BUTTON`/
+  `B_SECONDARY_MOUSE_BUTTON`/`B_TERTIARY_MOUSE_BUTTON` bitmask, values
+  copied verbatim from `View.h`'s `B_MOUSE_BUTTON(n) = 1 << (n-1)` (a real
+  `[Flags]` enum -- independent bits). Delivered by `OnMouseDown`/
+  `OnMouseMoved`; see "BView input" below for why `OnMouseUp` does NOT get
+  one.
+- `Haiku.Interface.MouseTransit` -- Haiku's `B_ENTERED_VIEW`/`B_INSIDE_VIEW`/
+  `B_EXITED_VIEW`/`B_OUTSIDE_VIEW` constants, delivered as `OnMouseMoved`'s
+  second parameter. Deliberately NOT a `[Flags]` enum, unlike
+  `MouseButtons` above -- sequential and mutually exclusive.
+- `Haiku.Interface.KeyBytes` -- single-byte control-character constants
+  (`Escape`, `Backspace`, the arrow keys, ...) copied verbatim from
+  `headers/os/interface/InterfaceDefs.h`, for comparing against
+  `OnKeyDown`/`OnKeyUp`'s raw `byte[]`. Does not cover function keys
+  (F1-F12); see "BView input" below.
 
-Not yet covered: everything else under `BView` -- mouse/keyboard input,
-`FrameResized`/`FrameMoved`, layout, scrolling, fonts beyond the current
-default, custom drawing patterns (`FillRect`/`StrokeRect`/`StrokeLine`
-always use `B_SOLID_HIGH`; see `hs_view.h`'s DRAWING note), and
-`AddChild`'s `before` (insert position) parameter -- deliberately deferred
-to a follow-up slice rather than folded into this one. Also not yet
-covered: everything else in Interface Kit (~50 other classes), `BScreen`,
-`BDirectWindow`.
+Not yet covered: modifier keys (Shift/Ctrl/Option/Command), `GetMouse()`
+polling, drag & drop, function-key identification, `FrameResized`/
+`FrameMoved`, layout, scrolling, fonts beyond the current default, custom
+drawing patterns (`FillRect`/`StrokeRect`/`StrokeLine` always use
+`B_SOLID_HIGH`; see `hs_view.h`'s DRAWING note), and `AddChild`'s `before`
+(insert position) parameter -- deliberately deferred to a follow-up slice
+rather than folded into this one. Also not yet covered: everything else in
+Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -304,6 +325,56 @@ was separately confirmed NOT to hit this: see `managed/Sample/Program.cs`'s
 its drawn content. Read issue #4 in full before adding a `Draw()`-firing
 automated test back to `ViewTests.cs`.
 
+## BView input: threading, the MouseUp asymmetry, and what's not covered
+
+Mouse and keyboard hooks (`OnMouseDown`/`OnMouseUp`/`OnMouseMoved`/
+`OnKeyDown`/`OnKeyUp`) fire on exactly the same thread as `Draw()` and the
+attach/detach hooks -- the owning window's message-loop thread -- for
+exactly the same reason: a `BView` has no thread of its own (see "BView:
+no thread of its own" above). Nothing new to work out there.
+
+Two things ARE specific to this slice, both found by reading the actual
+installed headers and the Be Book rather than assumed from BeOS-era memory:
+
+1. **`B_MOUSE_UP` does not carry a `buttons` field.** `B_MOUSE_DOWN` and
+   `B_MOUSE_MOVED` both do (confirmed against the Be Book's
+   message-constants documentation), so `OnMouseDown`/`OnMouseMoved` both
+   take a `MouseButtons buttons` parameter -- but `OnMouseUp` does not take
+   one at all. Watch for this if you're used to another toolkit that hands
+   every mouse hook the same signature.
+2. **`MakeFocus`/`IsFocus` work regardless of `ViewFlags`.** `B_NAVIGABLE`
+   (already in `ViewFlags`) only affects Tab-key auto-cycling between
+   views, not whether a direct `MakeFocus(true)` call takes effect --
+   verified against `View.h`, not assumed. A view must have focus
+   (`IsFocus == true`) to receive `OnKeyDown`/`OnKeyUp` at all.
+
+`Invalidate()` was also added to `View` in this slice, even though it's
+not part of the minimal BeAPI surface this binding otherwise sticks to --
+without some way to ask app_server for a redraw, a mouse/keyboard-driven
+view (this slice's whole point) would have no way to make what it last
+drew stale. It's a thin wrapper over `BView::Invalidate()`: schedules a
+redraw on the owning window's thread, does not draw synchronously.
+
+**Verifying that the hooks actually fire has no automated or synthetic
+path in this project's current environment**, for the same reason
+`Draw()`'s own regression coverage stops where it does (see
+[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 and `ViewInputTests.cs`'s own
+class remarks): there is no supported way from inside the same process to
+synthesize a real mouse/keyboard input event without either driving actual
+hardware or hand-constructing and posting raw `BMessage`s to a specific
+view from a second process -- both out of scope here, and this development
+environment has no input-injection tool (no `xdotool` or equivalent) to
+reach for either. What IS automated is everything that doesn't depend on
+an actual input event arriving -- `MakeFocus`/`IsFocus` round-tripping,
+`Invalidate()` not throwing, and the `MouseButtons`/`MouseTransit`/
+`KeyBytes` values themselves (see `ViewInputTests.cs`, module `BView
+Input`). Real hook-firing is verified the same way `Draw()` was: by
+running `Sample.exe` and watching it happen -- move the mouse over its
+window, click, and type, and both the console (`[6]` lines) and the view's
+own on-screen text update live. If you have physical or remote-desktop
+access to the Haiku machine, `Sample.exe`'s `DemoView` is written so that
+just interacting with it IS the verification.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -337,18 +408,27 @@ sitting at Haiku's own Terminal or running this over SSH.)
 `Sample.exe` is now a small windowed app (see `managed/Sample/Program.cs`):
 it shows a real `BWindow` containing a `DemoView` that actually draws
 something (a filled/stroked rect and a line of text, via real `BeAPI`
-calls), and waits for you to close it (its title bar's close box), at which
-point `WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to
-quit too. Expected output:
+calls), takes keyboard focus and tracks mouse/keyboard input live (see
+"BView input" above), and waits for you to close it (its title bar's close
+box), at which point `WindowFlags.QuitOnWindowClose` signals the owning
+`BApplication` to quit too. Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it or type, close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
 ```
+
+Moving the mouse over the window, clicking, and typing each print an
+additional `[6] ...` line (e.g. `[6] MouseDown at (123, 45), buttons=Primary`,
+`[6] KeyDown: Escape (0x1b)`) and redraw the view's own on-screen "Last
+event"/"Mouse position"/"Last key down"/"Last key up" text live -- that
+interaction is the actual verification for this slice's mouse/keyboard
+hooks, since (per "BView input" above) there's no automated or synthetic
+way to fire them in this project's environment.
 
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
@@ -403,6 +483,11 @@ left on screen BEFORE that test runs, with its result appended once known:
   Int16RoundTrips ... PASS
   ...
 
+== BView Input ==
+  IsFocusDefaultsFalseBeforeMakeFocusIsCalled ... PASS
+  FocusRoundTripsWhileAttachedToUnshownWindow ... PASS
+  ...
+
 == BView ==
   ConstructionAndGeometryRoundTrip ... PASS
   AddChildFiresAttachedToWindowSynchronously ... PASS
@@ -414,7 +499,7 @@ left on screen BEFORE that test runs, with its result appended once known:
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-41 passed, 0 failed, 0 errored
+48 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -435,7 +520,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Four modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Five modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -450,6 +535,13 @@ today:
   include an automated `Draw()`-firing test -- read that file's class
   remarks and [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding
   one back.
+- `BView Input` (class `ViewInputTests`) -- `MakeFocus`/`IsFocus`
+  round-tripping, `Invalidate()` not throwing, and the `MouseButtons`/
+  `MouseTransit`/`KeyBytes` values themselves (see
+  `managed/Tests/ViewInputTests.cs`). Deliberately does NOT include a test
+  that actually fires `OnMouseDown`/`OnMouseUp`/`OnMouseMoved`/`OnKeyDown`/
+  `OnKeyUp` -- read that file's class remarks and "BView input" above
+  before trying to add one.
 - `Interface Kit` (class `WindowTests`) -- `BWindow`'s `Quit()`/
   `OnDestroyed()` lifecycle (see `managed/Tests/WindowTests.cs`), including
   the poll-with-timeout pattern needed because there's no blocking
