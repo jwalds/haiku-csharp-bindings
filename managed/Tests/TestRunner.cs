@@ -22,6 +22,14 @@ namespace Haiku.Testing
 	/// name sitting on screen without a result, rather than nothing at
 	/// all until it finishes.
 	///
+	/// Test classes run in ascending [TestOrder(n)] order (default 0, see
+	/// TestOrderAttribute.cs), with ties broken alphabetically by class
+	/// name so the order is deterministic even for two untagged classes --
+	/// NOT in whatever order Assembly.GetTypes() happens to return them,
+	/// which is a Mono/mcs implementation detail this framework used to
+	/// rely on silently until that turned out to matter (see
+	/// ApplicationTests' own [TestOrder] for why).
+	///
 	/// Pass a substring as the one command-line argument to only run test
 	/// classes whose module name or class name contains it, e.g.
 	/// `mono Tests.exe BMessage` or `mono Tests.exe Message` (both match
@@ -37,6 +45,7 @@ namespace Haiku.Testing
 			int failed = 0;
 			int errored = 0;
 
+			List<Type> testClasses = new List<Type>();
 			foreach (Type type in Assembly.GetExecutingAssembly().GetTypes()) {
 				if (!type.IsClass || !type.IsPublic)
 					continue;
@@ -47,13 +56,25 @@ namespace Haiku.Testing
 						&& moduleName.ToLower().IndexOf(filter) < 0)
 					continue;
 
+				if (!HasAnyTestMethod(type))
+					continue;
+
+				testClasses.Add(type);
+			}
+
+			testClasses.Sort(delegate(Type a, Type b) {
+				int orderCompare = OrderOf(a).CompareTo(OrderOf(b));
+				return orderCompare != 0 ? orderCompare : string.CompareOrdinal(a.Name, b.Name);
+			});
+
+			foreach (Type type in testClasses) {
+				string moduleName = ModuleNameOf(type);
+
 				List<MethodInfo> tests = new List<MethodInfo>();
 				foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance)) {
 					if (Attribute.IsDefined(method, typeof(TestAttribute)))
 						tests.Add(method);
 				}
-				if (tests.Count == 0)
-					continue;
 
 				Console.WriteLine();
 				Console.WriteLine("== " + moduleName + " ==");
@@ -98,10 +119,25 @@ namespace Haiku.Testing
 			return (failed == 0 && errored == 0) ? 0 : 1;
 		}
 
+		private static bool HasAnyTestMethod(Type type)
+		{
+			foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance)) {
+				if (Attribute.IsDefined(method, typeof(TestAttribute)))
+					return true;
+			}
+			return false;
+		}
+
 		private static string ModuleNameOf(Type type)
 		{
 			TestModuleAttribute module = (TestModuleAttribute)Attribute.GetCustomAttribute(type, typeof(TestModuleAttribute));
 			return module != null ? module.Name : type.Name;
+		}
+
+		private static int OrderOf(Type type)
+		{
+			TestOrderAttribute order = (TestOrderAttribute)Attribute.GetCustomAttribute(type, typeof(TestOrderAttribute));
+			return order != null ? order.Order : 0;
 		}
 
 		// Reflection's MethodInfo.Invoke wraps whatever a test method

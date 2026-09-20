@@ -1,52 +1,53 @@
 using System;
 using Haiku.App;
+using Haiku.Interface;
 
 /*
- * A minimal, runnable example of this binding's Application Kit slice.
- * This is NOT where verification of the binding lives anymore -- see
- * managed/Tests/ (built as Tests.exe) for the actual regression suite,
- * including ApplicationTests.ReadyToRunMessageAndQuitRequestedAllFireInOrder,
- * which is this exact scenario wrapped in assertions instead of eyeballed
- * Console output. This file exists purely to be a clear, working starting
- * point for your own app: subclass Application, override the callbacks you
- * need, construct it, call Run().
+ * A minimal, runnable example of this binding's Interface Kit slice: a
+ * BWindow you can actually see and close. This is NOT where verification of
+ * the binding lives -- see managed/Tests/ (built as Tests.exe) for the
+ * actual regression suite, including WindowTests.QuitPostsRequestAndFires-
+ * DestroyedCallback, which exercises this same Quit()/OnDestroyed() path
+ * without needing a human to click anything. This file exists purely to be
+ * a clear, working starting point for your own windowed app.
  *
- * The callbacks below fire on a native OS thread BLooper::Run() spawns --
- * one Mono never created -- not on the thread that called Run(). See
- * hs_application.h's threading note and Application.cs's class remarks if
- * you're wondering why that matters.
+ * DemoWindow uses WindowFlags.QuitOnWindowClose, so clicking its title bar's
+ * close box doesn't just end the window -- BWindow.h's own flag semantics
+ * make it signal the owning BApplication to quit too, which is what lets
+ * this Main() (blocked in app.Run(), same as the Application Kit sample)
+ * return once you close the window.
  */
+public class DemoWindow : Window
+{
+	public DemoWindow()
+		: base(new Rect(100, 100, 500, 350), "Haiku C# Bindings Demo",
+			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
+	{
+	}
+
+	protected override void OnDestroyed()
+	{
+		Console.WriteLine("[3] DemoWindow destroyed.");
+	}
+}
+
 public class DemoApplication : Application
 {
-	private const uint PingMessage = 0x50494E47; // 'PING'
-
 	public DemoApplication() : base("application/x-vnd.HaikuSharp-Demo")
 	{
 	}
 
 	protected override void OnReadyToRun()
 	{
-		Console.WriteLine("[1] OnReadyToRun fired -- native callback into managed code works.");
-
-		using (var ping = new Message(PingMessage)) {
-			ping.AddString("greeting", "hello from the looper thread's own message");
-			PostMessage(ping);
-		}
-	}
-
-	protected override void OnMessageReceived(Message message)
-	{
-		if (message.What == PingMessage) {
-			Console.WriteLine("[2] Received our own PING message back: \"{0}\"",
-				message.FindString("greeting"));
-			Console.WriteLine("[3] Requesting quit via SystemMessages.QuitRequested...");
-			PostMessage(SystemMessages.QuitRequested);
-		}
+		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
+		DemoWindow window = new DemoWindow();
+		window.Show();
+		Console.WriteLine("[2] Window shown -- close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()
 	{
-		Console.WriteLine("[4] OnQuitRequested fired -- allowing shutdown.");
+		Console.WriteLine("[4] Application OnQuitRequested fired -- allowing shutdown.");
 		return true;
 	}
 }
@@ -57,7 +58,7 @@ public class Program
 	{
 		var app = new DemoApplication();
 		try {
-			app.Run(); // blocks here until DemoApplication quits
+			app.Run(); // blocks here until the window's close box quits the app
 		} catch (HaikuException ex) {
 			Console.Error.WriteLine("Haiku API error: " + ex.Message);
 			return 1;

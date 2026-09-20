@@ -11,11 +11,14 @@ make -C native
 echo "== building managed/Haiku.App/Haiku.App.dll =="
 mcs -target:library -out:Haiku.App.dll managed/Haiku.App/*.cs
 
+echo "== building managed/Haiku.Interface/Haiku.Interface.dll =="
+mcs -target:library -out:Haiku.Interface.dll -reference:Haiku.App.dll managed/Haiku.Interface/*.cs
+
 echo "== building managed/Sample/Sample.exe =="
-mcs -target:exe -out:Sample.exe -reference:Haiku.App.dll managed/Sample/*.cs
+mcs -target:exe -out:Sample.exe -reference:Haiku.App.dll -reference:Haiku.Interface.dll managed/Sample/*.cs
 
 echo "== building managed/Tests/Tests.exe =="
-mcs -target:exe -out:Tests.exe -reference:Haiku.App.dll managed/Tests/*.cs
+mcs -target:exe -out:Tests.exe -reference:Haiku.App.dll -reference:Haiku.Interface.dll managed/Tests/*.cs
 
 echo
 echo "Build complete. Run the sample with:"

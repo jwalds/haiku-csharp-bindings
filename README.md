@@ -44,12 +44,13 @@ piece of it directly (`wait_for_thread`) rather than re-wrapping it.
   matching a GC'd/refcounted target language, and letting the target
   language override native virtuals like `MessageReceived()`).
 
-## Current scope: Application Kit only
+## Current scope
 
-This first slice covers just enough of `BApplication`/`BLooper`/`BHandler`/
-`BMessage` to prove the hardest architectural question works at all on this
-specific stack — see "The open question" below — before spending effort on
-the much larger Interface Kit (~52 classes) or anything else. Concretely:
+### Application Kit
+
+Covers just enough of `BApplication`/`BLooper`/`BHandler`/`BMessage` to
+prove the hardest architectural question works at all on this specific
+stack — see "The open question" below.
 
 - `Haiku.App.Application` — wraps a native `BApplication` subclass
   (`HSApplication`, in `native/`). Override `OnMessageReceived`,
@@ -68,17 +69,43 @@ the much larger Interface Kit (~52 classes) or anything else. Concretely:
   constants (`B_QUIT_REQUESTED`, `B_READY_TO_RUN`), packed the same way
   Haiku's own C++ headers pack them.
 
-Not yet covered: `BWindow`/`BView`/anything Interface Kit (no GUI yet --
-this is deliberately windowless), `BMessenger`, `BInvoker`,
-`BMessageFilter`/`BMessageQueue`/`BMessageRunner`, `BRoster`, filesystem
-references (`entry_ref`/`node_ref` -- `AddRef`/`FindRef`/`AddNodeRef`/
-`FindNodeRef`, which fit more naturally with a future Storage Kit
-wrapper), `BMessage`'s flattened-object Add/Find pair (`AddFlat`/
-`FindFlat`, which needs `BFlattenable`), archiving (`BArchivable`),
-scripting specifiers, delivery/reply plumbing (`SendReply`,
-`WasDelivered`, etc. -- these belong more with `BMessenger`/`BLooper`),
-and the `Get*`/`Set*` convenience-with-defaults sugar and indexed
-(multiple-values-per-name) overloads real `BMessage` also has.
+Not yet covered: `BMessenger`, `BInvoker`, `BMessageFilter`/
+`BMessageQueue`/`BMessageRunner`, `BRoster`, filesystem references
+(`entry_ref`/`node_ref` -- `AddRef`/`FindRef`/`AddNodeRef`/`FindNodeRef`,
+which fit more naturally with a future Storage Kit wrapper), `BMessage`'s
+flattened-object Add/Find pair (`AddFlat`/`FindFlat`, which needs
+`BFlattenable`), archiving (`BArchivable`), scripting specifiers, delivery/
+reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
+`BMessenger`/`BLooper`), and the `Get*`/`Set*` convenience-with-defaults
+sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
+has.
+
+### Interface Kit (just started)
+
+A single first slice: `BWindow`, and only `BWindow` -- no `BView` yet, so
+nothing is drawable or interactive inside the window it shows. This kit
+lives in its own assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll`
+for `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
+splits the Application and Interface Kits -- and setting the pattern for
+future kits (Storage, etc.) to also get their own assembly.
+
+- `Haiku.Interface.Window` -- wraps a native `BWindow` subclass
+  (`HSWindow`, in `native/`). Override `OnMessageReceived`,
+  `OnQuitRequested`, `OnDestroyed`. `Show`/`Hide`/`IsHidden`, `Quit`,
+  `Lock`/`Unlock`/`IsLocked`, `Title`, `Frame`, `MoveTo`, `ResizeTo`. See
+  "BWindow: threading, quitting, and destruction" below before touching
+  `Window.cs` or `hs_window.cpp` -- its lifecycle is shaped differently
+  from `Application`'s in ways that matter.
+- `Haiku.Interface.WindowLook`/`WindowFeel`/`WindowFlags` -- Haiku's own
+  `window_look`/`window_feel`/flags enums, values copied verbatim from
+  `headers/os/interface/Window.h`.
+
+Not yet covered: `BView` and everything under it (so: no drawing, no
+controls, no mouse/keyboard input, no layout) -- deliberately deferred to
+its own follow-up slice rather than folded into this one, per the
+BWindow-first scoping decision this slice started from. Also not yet
+covered: everything else in Interface Kit (~50 other classes), `BScreen`,
+`BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -98,6 +125,92 @@ actual regression test (see "Testing" below): if it passes, the cross-thread
 callback story holds up here and the rest of this plan (Interface Kit, etc.)
 can proceed on solid ground. If it hangs or crashes instead, that's the very
 first thing to debug — everything else in this binding depends on it.
+
+That question came back in a different shape once `BWindow` entered the
+picture -- see the next section.
+
+## BWindow: threading, quitting, and destruction
+
+Three things about `BWindow`'s lifecycle are different enough from
+`BApplication`'s that they shaped `Window.cs`/`hs_window.h`/`hs_window.cpp`'s
+whole design, each one verified against real Haiku source/docs rather than
+assumed (this project has been burned by assuming before -- see the git
+history):
+
+1. **The thread doesn't exist until `Show()`.** Unlike `BApplication`,
+   whose `Run()` spawns its message-loop thread immediately, a freshly
+   constructed `BWindow` has no running thread at all -- every constructor
+   delegates to a private `_InitData()` that never spawns one. The Haiku
+   Book is explicit: "windows are hidden by default, you must call `Show()`
+   ... If this is the first time `Show()` has been called ... the message
+   loop is started." So it's safe to configure a `Window` (`SetTitle`,
+   `MoveTo`, a future `AddChild`, ...) right after construction, on
+   whatever thread created it, with no locking needed -- there's no other
+   thread yet to race with. `Show()`'s first call is the one moment that
+   changes, exactly like `BApplication.Run()`'s threading note above.
+2. **`Quit()` posts a message; it doesn't call `BWindow::Quit()`
+   directly.** `BWindow::Quit()` (overriding `BLooper::Quit()`) requires
+   the caller to already hold the window's lock -- verified against
+   `src/kits/interface/Window.cpp`, which logs an error and only survives
+   via a defensive fallback `Lock()` that can still fail if called
+   unlocked. Rather than take on that locking protocol from arbitrary
+   calling threads, `hs_window_quit()` posts `B_QUIT_REQUESTED` through the
+   normal message queue instead -- exactly what a window's own close box
+   does internally, and documented thread-safe from any thread, including
+   the window's own. `Window.Quit()` is this: async, safe to call from
+   anywhere, and it doesn't block waiting for the window to actually die.
+3. **There's no `Application.Run()`-style blocking call to learn a window
+   died, so there's a `Destroyed` callback instead.** A shown window lives
+   and dies independently of whatever thread created it -- nothing blocks
+   waiting for it the way `Run()` blocks for the app. `HSWindow` overrides
+   its own C++ destructor (not a `BWindow` virtual -- none exists for
+   "about to be deleted") and fires a registered callback unconditionally,
+   right there, covering both ways an `HSWindow` can die with one hook: the
+   normal quit flow (`QuitRequested()` returns true, `BLooper`'s own
+   thread-exit machinery does `delete this` **on the window's own thread**
+   some time later) and the "never shown, changed my mind" cleanup path
+   (`Window.Dispose()` calling `hs_window_destroy()`, which deletes
+   synchronously on whatever thread called it). `Window.OnDestroyed()` is
+   this callback; by the time it fires, no other method on that `Window`
+   is safe to call.
+
+**Ownership rule that falls out of all three:** `Window.Dispose()` is only
+safe to call synchronously (`hs_window_destroy`) if `Show()` was never
+called -- no thread exists yet. Once shown, the only safe teardown is
+`Quit()` -- calling the synchronous destroy on a shown window would race
+with its own live thread. `Window.cs` tracks whether `Show()` was ever
+called and picks the right one automatically; you don't need to.
+
+**Two more facts, found empirically while building `WindowTests.cs`, that
+don't yet have a full explanation but are real and worth knowing before you
+hit them yourself:**
+
+- **A `BApplication` that has been `Run()` all the way through a
+  `QuitRequested()`-returns-true cycle is a one-shot event for the *whole
+  process*, not just for that object.** Once that's happened, no further
+  `BApplication` can ever be constructed again in the same process --
+  not even a plain one you never intend to `Run()`. Constructing and
+  disposing a `BApplication` that's never been `Run()` has no such effect
+  and can be repeated freely. See `Application.cs`'s "ONE-SHOT PER
+  PROCESS" remarks for the full writeup and how it was pinned down. This
+  is why `managed/Tests/ApplicationTests.cs` is tagged `[TestOrder(100)]`
+  -- it has to run dead last in `Tests.exe`, after anything else in the
+  suite that needs a `BApplication` of its own.
+- **Overriding `Window.OnQuitRequested()` in a test whose process later
+  runs a real `Application.Run()` cycle reliably triggers the same
+  one-shot poisoning, even though the underlying native callback fires
+  either way** (`Window.cs` always wires up the native quit-requested
+  callback, whether or not a subclass overrides the C# hook). Bisected
+  against the real files, not guessed: removing just the override (and
+  keeping everything else identical, including a same-shaped `OnDestroyed`
+  override that does *not* cause the problem) fixes it. See
+  `managed/Tests/WindowTests.cs`'s remarks for the detail and what was
+  ruled out. The likely mechanism is some interaction between Mono's
+  embedding layer and a foreign (Haiku-spawned, not Mono-created) thread
+  that calls into managed code and then exits without an explicit Mono
+  detach -- the same category of "thread Mono never created" concern this
+  README has flagged since the Application Kit slice -- but it isn't
+  nailed down yet. Treat this as an open item, not a closed one.
 
 ## Building and running (on Haiku)
 
@@ -129,15 +242,26 @@ empty variable to your own native directory finds *only* your own directory
 needs. Spelling out the full path explicitly works the same whether you are
 sitting at Haiku's own Terminal or running this over SSH.)
 
-Expected output:
+`Sample.exe` is now a small windowed app (see `managed/Sample/Program.cs`):
+it shows a real `BWindow` and waits for you to close it (its title bar's
+close box), at which point `WindowFlags.QuitOnWindowClose` signals the
+owning `BApplication` to quit too. Expected output:
 
 ```
-[1] OnReadyToRun fired -- native callback into managed code works.
-[2] Received our own PING message back: "hello from the looper thread's own message"
-[3] Requesting quit via SystemMessages.QuitRequested...
-[4] OnQuitRequested fired -- allowing shutdown.
+[1] OnReadyToRun fired -- creating and showing the demo window.
+[2] Window shown -- close it (its title bar's close box) to quit.
+[4] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
 ```
+
+(`[3]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
+itself gets torn down as part of that shutdown -- which happens when you
+close it via its own close box, but not necessarily if the application is
+asked to quit some other way, e.g. `hey <signature> QUIT` from a shell,
+since that quits the app directly rather than going through the window's
+own close-box path. Either way `[1]`/`[2]`/`[4]`/"App exited cleanly" is
+the proof that matters: a real window was created and shown, and the app
+shut down cleanly afterward.)
 
 ## Testing
 
@@ -161,33 +285,52 @@ left on screen BEFORE that test runs, with its result appended once known:
   Int16RoundTrips ... PASS
   ...
 
+== Interface Kit ==
+  QuitPostsRequestAndFiresDestroyedCallback ... PASS
+
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-34 passed, 0 failed, 0 errored
+35 passed, 0 failed, 0 errored
 ```
 
-That ordering is deliberate: `ApplicationTests` blocks for a moment on a
-real native message loop, so if a future change ever made it hang, you'd
-see its name sitting on screen with no result yet, telling you exactly
-which test to look at, rather than silence until it either finishes or you
-give up waiting.
+That ordering is deliberate, and no longer just a convenience: test
+classes run in ascending `[TestOrder(n)]` order (default `0`, see
+`managed/Tests/TestOrderAttribute.cs`), NOT whatever order reflection
+happens to hand them back. `ApplicationTests` is tagged `[TestOrder(100)]`
+specifically so it always runs dead last -- see "BWindow: threading,
+quitting, and destruction" above for why running a real `Application.Run()`
+cycle anywhere but last would silently break every `BApplication`-needing
+test after it, for the rest of the process. Independent tests should never
+need `[TestOrder]`; it exists for that one real constraint, not as a
+general-purpose knob.
+
+Separately, `ApplicationTests` blocks for a moment on a real native message
+loop, so if a future change ever made it hang, you'd see its name sitting
+on screen with no result yet, telling you exactly which test to look at,
+rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Two modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Three modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
   `BMessage` Add/Find pair or whole-message operation (see
   `managed/Tests/MessageTests.cs`). Add a new one here alongside every new
   `hs_message.h` function.
+- `Interface Kit` (class `WindowTests`) -- `BWindow`'s `Quit()`/
+  `OnDestroyed()` lifecycle (see `managed/Tests/WindowTests.cs`), including
+  the poll-with-timeout pattern needed because there's no blocking
+  "wait for this window" call. Read its class remarks before adding a
+  second test here or overriding `OnQuitRequested` in a probe window --
+  see "BWindow" above.
 - `Application Kit` (class `ApplicationTests`) -- the threading proof from
   "The open question" above, as an actual regression test rather than
   something you verify by eye. Slower and less isolated than a
   `MessageTests` case (it spins up a real `BApplication` and blocks on a
-  real native message loop), but it belongs in the same suite rather than
-  nowhere.
+  real native message loop), and -- per the one-shot constraint above --
+  must stay `[TestOrder(100)]` (last).
 
 There is no NUnit (or any test framework) anywhere in this Mono 6.14.1
 port's actual installed GAC, and no realistic way to get one: modern
@@ -196,27 +339,32 @@ only NUnit on this machine at all is old 2.6.2 copies buried inside an
 unrelated leftover full Mono source checkout (vendored there just to build
 *Mono's own* Newtonsoft.Json/Cecil test suites) -- not something this
 project should depend on, since it isn't ours and could disappear. Instead,
-`managed/Tests/TestAttribute.cs`/`TestModuleAttribute.cs`/`Assert.cs`/
-`TestRunner.cs` are a deliberately tiny (~180 line), dependency-free
-framework of our own: a `[Test]` attribute, a `[TestModule("...")]`
-class-level attribute for the header/filter name, reflection-based
-discovery, a handful of `Assert.AreEqual`/`IsTrue`/`IsNull`/`Fail` helpers,
-and a runner that constructs a fresh instance of the test class per test
-(so one test can't see state another left behind) and reports
-`PASS`/`FAIL`/`ERROR` per test plus a final count. `FAIL` means an
-`Assert.*` call didn't hold; `ERROR` means the test threw something else
-entirely (a null reference, a native crash surfacing as an exception,
-...) -- worth keeping visually distinct, since those call for different
-next steps. Same rationale as the hand-written shim itself: small enough
-that every line is understood, and guaranteed to compile with `mcs` and
-run on this exact Mono build since we control every line of it.
+`managed/Tests/TestAttribute.cs`/`TestModuleAttribute.cs`/
+`TestOrderAttribute.cs`/`Assert.cs`/`TestRunner.cs` are a deliberately tiny,
+dependency-free framework of our own: a `[Test]` attribute, a
+`[TestModule("...")]` class-level attribute for the header/filter name, an
+optional `[TestOrder(n)]` class-level attribute for the rare case a test
+can't be fully isolated (see above), reflection-based discovery, a handful
+of `Assert.AreEqual`/`IsTrue`/`IsNull`/`Fail` helpers, and a runner that
+constructs a fresh instance of the test class per test (so one test can't
+see state another left behind) and reports `PASS`/`FAIL`/`ERROR` per test
+plus a final count. `FAIL` means an `Assert.*` call didn't hold; `ERROR`
+means the test threw something else entirely (a null reference, a native
+crash surfacing as an exception, ...) -- worth keeping visually distinct,
+since those call for different next steps. Same rationale as the
+hand-written shim itself: small enough that every line is understood, and
+guaranteed to compile with `mcs` and run on this exact Mono build since we
+control every line of it.
 
 To add a test: write a public, parameterless, `void`-returning instance
 method tagged `[Test]` on a public class anywhere under `managed/Tests/`
-(a new file per kit, following `MessageTests.cs`/`ApplicationTests.cs`),
-tag the class itself with `[TestModule("...")]` naming the kit it covers,
-throw via one of the `Assert.*` helpers (or `Assert.Fail(...)` directly) to
-report a failure, and rebuild.
+(a new file per kit, following `MessageTests.cs`/`WindowTests.cs`/
+`ApplicationTests.cs`), tag the class itself with `[TestModule("...")]`
+naming the kit it covers, throw via one of the `Assert.*` helpers (or
+`Assert.Fail(...)` directly) to report a failure, and rebuild. Only reach
+for `[TestOrder(n)]` if your test genuinely can't coexist with another
+regardless of what order they'd otherwise run in (see above) -- it's an
+escape hatch, not a default.
 
 ## Ownership rules (read before touching `Application.cs` or `hs_application.cpp`)
 
@@ -244,6 +392,16 @@ report a failure, and rebuild.
    boundary is a hard crash, not a catchable managed exception. Nothing in
    the current API surface throws in practice (`BMessage`'s Add/Find family
    returns `status_t`), but this is a hard rule for every future addition.
+4. **A fully-`Run()` `BApplication` is a one-shot event for the whole
+   process, not just for that object** -- see "BWindow: threading,
+   quitting, and destruction" above. If you're writing something (a test,
+   a tool) that might construct more than one `Application` over its
+   lifetime, this is not optional background reading.
+
+For `Window.cs`/`hs_window.cpp`'s own ownership rules (when `Dispose()` is
+safe to call synchronously vs. when it has to go through `Quit()` instead),
+see "BWindow: threading, quitting, and destruction" above rather than
+duplicating it here.
 
 ## Adding more BMessage fields
 
@@ -252,7 +410,7 @@ demonstrated across the full core round-trip (every scalar type, the
 geometry-ish struct types, nested messages, generic data, and
 `Has*`/`Replace*`/`RemoveName`/`CountNames`/etc. for all of them; see
 `managed/Tests/MessageTests.cs` for a working, run-on-every-change example
-of each one -- see "Testing" below). For a new `Add<Type>`/`Find<Type>`
+of each one -- see "Testing" above). For a new `Add<Type>`/`Find<Type>`
 pair: one `extern "C"`
 function to `hs_message.h`/`.cpp` following the existing functions
 exactly, one matching `DllImport` in `Native.cs`, one public method in
@@ -267,15 +425,33 @@ lightweight cross-team handle, not a plain struct), `entry_ref`/
 Kit wrapper instead), and `AddFlat`/`FindFlat` (needs a `BFlattenable`
 design of its own).
 
-## Adding a new kit (e.g. Interface Kit next)
+## Adding a new kit
 
-Follow `hs_application.h`/`.cpp` as the template for any class you need to
-let C# subclass/override (one native C++ subclass per base class, one
-callback-typedef + setter per virtual you expose). For classes nobody
-needs to override (most of Interface Kit's ~52 classes are plain widget
-wrappers), a much simpler shim — direct property/method wrapping with no
-callback machinery — is all that's needed; `hs_message.cpp` is the
-template for that simpler shape.
+Follow `hs_application.h`/`.cpp` (or now, `hs_window.h`/`.cpp`, which
+followed that same template while adding its own destroyed-callback and
+posted-quit patterns -- see "BWindow" above) for any class you need to let
+C# subclass/override: one native C++ subclass per base class, one
+callback-typedef + setter per virtual you expose, name the delegates with
+a prefix specific to that class (`Window*Callback`, not just
+`*Callback`) so two kits' similarly-named virtuals never collide in the
+same namespace. For classes nobody needs to override (most of Interface
+Kit's ~50 remaining classes, like most of Application Kit's, are plain
+data or widget wrappers), a much simpler shim — direct property/method
+wrapping with no callback machinery — is all that's needed;
+`hs_message.cpp` is the template for that simpler shape.
+
+A kit that needs to let C# subclass/override anything gets its own
+managed assembly (see `Haiku.Interface.dll`, referencing `Haiku.App.dll`
+for the types it reuses, like `Rect`/`Message`) rather than growing
+`Haiku.App.dll` indefinitely -- this mirrors Haiku's own kit boundaries and
+keeps each assembly's native surface reviewable on its own. A small
+plain-data struct used for P/Invoke marshaling only (like `hs_rect`) is
+cheap enough to duplicate locally in the new assembly's own `Native.cs`
+rather than share via `InternalsVisibleTo`; a real class with meaningful
+behavior (like `Message`, which `Haiku.Interface.Window` needs to hand
+back a borrowed instance of) is worth an `InternalsVisibleTo` grant on the
+one constructor it needs instead -- see `Haiku.App/AssemblyInfo.cs`'s
+comment for that tradeoff spelled out.
 
 ## License
 

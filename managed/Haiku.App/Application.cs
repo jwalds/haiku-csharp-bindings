@@ -17,6 +17,26 @@ namespace Haiku.App
 	 * Only once Run() actually RETURNS (per the native ownership rule) is
 	 * this instance's native handle gone; calling any other method on this
 	 * object after that point throws ObjectDisposedException.
+	 *
+	 * ONE-SHOT PER PROCESS, NOT JUST ONE AT A TIME
+	 * ----------------------------------------------
+	 * Real Haiku apps construct exactly one BApplication, Run() it, and let
+	 * the process exit soon after it quits -- normal usage never needs more
+	 * than that. It turns out that isn't just the normal pattern, it's a
+	 * hard requirement: verified empirically on real Haiku hardware (while
+	 * building this binding's test suite -- see managed/Tests/
+	 * ApplicationTests.cs's own remarks for the full story), once a
+	 * BApplication's Run() has spawned its message-loop thread and that
+	 * thread has quit and deleted the object, NO further BApplication can
+	 * ever be constructed again in that same process -- the attempt hangs
+	 * indefinitely, not even a plain never-Run() one succeeds afterward.
+	 * Constructing-and-disposing a BApplication that never called Run() has
+	 * no such effect and can be repeated freely; it's specifically the
+	 * spawn-thread-then-self-delete path that permanently uses up the
+	 * process's one shot. If your process legitimately needs more than one
+	 * BApplication's worth of app_server access over its lifetime, it
+	 * can't get it by constructing a second Application after the first
+	 * one's Run() returns -- that path is closed, not just discouraged.
 	 */
 	public class Application : IDisposable
 	{
