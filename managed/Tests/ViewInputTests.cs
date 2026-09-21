@@ -28,6 +28,19 @@ using Haiku.Testing;
 /// is verified visually instead, via Sample.exe -- same division of labor
 /// as Draw() itself.
 ///
+/// The same applies to the ModifierKeys enum and the standalone
+/// Modifiers.Current accessor added alongside OnMouseDown/OnMouseUp/
+/// OnKeyDown/OnKeyUp's new "modifiers" parameter (see hs_view.h's
+/// MODIFIERS note and Modifiers.cs): there is no automated way to hold a
+/// real Shift/Ctrl/Option/Command key down while a test runs, so what's
+/// covered below is the enum's exact verified bit values (same style as
+/// the MouseButtons/MouseTransit/KeyBytes checks above) and
+/// Modifiers.Current not throwing when called outside any input hook.
+/// Modifiers.Current needs no BApplication/BWindow at all -- hs_modifiers()
+/// wraps Haiku's standalone modifiers() function, documented safe to call
+/// from any thread with no locking -- so, unlike this file's other tests,
+/// that one test does not open a using (new Application(...)) block.
+///
 /// Follows ViewTests'/WindowTests' now-established pattern of opening (and
 /// disposing, via `using`) a fresh, never-Run() BApplication per test
 /// method, and never calling Show() on the window (per hs_window.h,
@@ -156,5 +169,68 @@ public class ViewInputTests
 		Assert.AreEqual((byte)0x1f, KeyBytes.DownArrow, "DownArrow");
 		Assert.AreEqual((byte)0x20, KeyBytes.Space, "Space");
 		Assert.AreEqual((byte)0x7f, KeyBytes.Delete, "Delete");
+	}
+
+	[Test]
+	public void ModifierKeysAreIndependentBitsThatMatchInterfaceDefsH()
+	{
+		// Pure managed-side sanity check against the exact hex literals
+		// copied from InterfaceDefs.h into Modifiers.cs -- catches a
+		// typo'd bit without needing any native call or a real key held
+		// down. Covers both the "either side" convenience bits and the
+		// side-specific ones, plus the lock keys and NoCommandKey.
+		Assert.AreEqual((uint)0x00000000, (uint)ModifierKeys.None, "None");
+		Assert.AreEqual((uint)0x00000001, (uint)ModifierKeys.Shift, "Shift");
+		Assert.AreEqual((uint)0x00000002, (uint)ModifierKeys.Command, "Command");
+		Assert.AreEqual((uint)0x00000004, (uint)ModifierKeys.Control, "Control");
+		Assert.AreEqual((uint)0x00000008, (uint)ModifierKeys.CapsLock, "CapsLock");
+		Assert.AreEqual((uint)0x00000010, (uint)ModifierKeys.ScrollLock, "ScrollLock");
+		Assert.AreEqual((uint)0x00000020, (uint)ModifierKeys.NumLock, "NumLock");
+		Assert.AreEqual((uint)0x00000040, (uint)ModifierKeys.Option, "Option");
+		Assert.AreEqual((uint)0x00000080, (uint)ModifierKeys.Menu, "Menu");
+		Assert.AreEqual((uint)0x00000100, (uint)ModifierKeys.LeftShift, "LeftShift");
+		Assert.AreEqual((uint)0x00000200, (uint)ModifierKeys.RightShift, "RightShift");
+		Assert.AreEqual((uint)0x00000400, (uint)ModifierKeys.LeftCommand, "LeftCommand");
+		Assert.AreEqual((uint)0x00000800, (uint)ModifierKeys.RightCommand, "RightCommand");
+		Assert.AreEqual((uint)0x00001000, (uint)ModifierKeys.LeftControl, "LeftControl");
+		Assert.AreEqual((uint)0x00002000, (uint)ModifierKeys.RightControl, "RightControl");
+		Assert.AreEqual((uint)0x00004000, (uint)ModifierKeys.LeftOption, "LeftOption");
+		Assert.AreEqual((uint)0x00008000, (uint)ModifierKeys.RightOption, "RightOption");
+		Assert.AreEqual((uint)0x00010000, (uint)ModifierKeys.NoCommandKey, "NoCommandKey");
+
+		// And that they combine as independent bits, same shape as the
+		// MouseButtonsAreIndependentBitsThatCombine check above.
+		ModifierKeys shiftAndControl = ModifierKeys.Shift | ModifierKeys.Control;
+		Assert.IsTrue((shiftAndControl & ModifierKeys.Shift) == ModifierKeys.Shift,
+			"Shift|Control should still test true for Shift");
+		Assert.IsTrue((shiftAndControl & ModifierKeys.Control) == ModifierKeys.Control,
+			"Shift|Control should still test true for Control");
+		Assert.IsTrue((shiftAndControl & ModifierKeys.Command) == ModifierKeys.None,
+			"Shift|Control should NOT test true for Command");
+	}
+
+	[Test]
+	public void ModifiersCurrentDoesNotThrow()
+	{
+		// Modifiers.Current wraps hs_modifiers(), which wraps Haiku's
+		// standalone modifiers() -- documented safe to call from any
+		// thread, with no BWindow/BApplication/locking involved at all
+		// (unlike Invalidate() above, which needs an attached View). All
+		// that's automatable without a real key held down is that the
+		// call succeeds and returns some value; the actual bits set
+		// depend on whatever the operator happens to be pressing when
+		// this test runs, which is exactly why Sample.exe's DemoView
+		// (not this file) is where real modifier state is verified, the
+		// same division of labor as the other input hooks.
+		// Following InvalidateDoesNotThrowOnAttachedUnshownView's pattern
+		// above: the check IS that this completes without throwing --
+		// there's nothing else automatable to assert about a value that
+		// depends on whatever the operator happens to be pressing right
+		// now. (An earlier draft asserted "current == current" to at
+		// least touch the return value, but the compiler correctly flags
+		// that as CS1718 -- almost certainly a typo -- and this project
+		// builds warning-free, so the call itself is the whole test.)
+		ModifierKeys current = Modifiers.Current;
+		GC.KeepAlive(current);
 	}
 }

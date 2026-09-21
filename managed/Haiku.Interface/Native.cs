@@ -40,19 +40,19 @@ namespace Haiku.Interface
 	 * must copy it into a managed byte[] before returning from the
 	 * callback, same rule as any other borrowed pointer in this binding. */
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-	internal delegate void ViewMouseDownCallback(IntPtr userData, HsPoint where, uint buttons);
+	internal delegate void ViewMouseDownCallback(IntPtr userData, HsPoint where, uint buttons, uint modifiers);
 
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-	internal delegate void ViewMouseUpCallback(IntPtr userData, HsPoint where);
+	internal delegate void ViewMouseUpCallback(IntPtr userData, HsPoint where, uint modifiers);
 
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ViewMouseMovedCallback(IntPtr userData, HsPoint where, uint transit, uint buttons);
 
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-	internal delegate void ViewKeyDownCallback(IntPtr userData, IntPtr bytes, int numBytes);
+	internal delegate void ViewKeyDownCallback(IntPtr userData, IntPtr bytes, int numBytes, uint modifiers);
 
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-	internal delegate void ViewKeyUpCallback(IntPtr userData, IntPtr bytes, int numBytes);
+	internal delegate void ViewKeyUpCallback(IntPtr userData, IntPtr bytes, int numBytes, uint modifiers);
 
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
@@ -263,5 +263,11 @@ namespace Haiku.Interface
 		[DllImport(Lib)]
 		[return: MarshalAs(UnmanagedType.I1)]
 		internal static extern bool hs_view_is_focus(IntPtr view);
+
+		/* Wraps the global modifiers() BeAPI function -- see hs_view.h's
+		 * own doc comment on hs_modifiers() and Modifiers.cs's Current
+		 * property, which is what actually calls this. */
+		[DllImport(Lib)]
+		internal static extern uint hs_modifiers();
 	}
 }

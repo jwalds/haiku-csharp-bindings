@@ -34,6 +34,7 @@ public class DemoView : View
 	private string _lastEvent = "(none yet -- move the mouse over this view, click, or type)";
 	private Point _lastMousePos;
 	private MouseButtons _lastButtons;
+	private ModifierKeys _lastModifiers;
 	private string _lastKeyDown = "(none yet)";
 	private string _lastKeyUp = "(none yet)";
 
@@ -55,23 +56,27 @@ public class DemoView : View
 		MakeFocus(true);
 	}
 
-	protected override void OnMouseDown(Point where, MouseButtons buttons)
+	protected override void OnMouseDown(Point where, MouseButtons buttons, ModifierKeys modifiers)
 	{
 		_lastEvent = "MouseDown at " + Describe(where) + ", buttons=" + buttons;
 		_lastMousePos = where;
 		_lastButtons = buttons;
+		_lastModifiers = modifiers;
 		Console.WriteLine("[6] " + _lastEvent);
 		Invalidate();
 	}
 
-	protected override void OnMouseUp(Point where)
+	protected override void OnMouseUp(Point where, ModifierKeys modifiers)
 	{
 		// No buttons parameter here -- B_MOUSE_UP carries no "buttons"
 		// field, unlike B_MOUSE_DOWN/B_MOUSE_MOVED (verified against the
 		// Be Book's message-constants docs, not assumed; see hs_view.h).
+		// It DOES carry modifiers, the asymmetry runs the other way for
+		// that field -- see hs_view.h's MODIFIERS note.
 		_lastEvent = "MouseUp at " + Describe(where);
 		_lastMousePos = where;
 		_lastButtons = MouseButtons.None;
+		_lastModifiers = modifiers;
 		Console.WriteLine("[6] " + _lastEvent);
 		Invalidate();
 	}
@@ -80,6 +85,12 @@ public class DemoView : View
 	{
 		_lastMousePos = where;
 		_lastButtons = buttons;
+
+		// No modifiers parameter on this hook -- B_MOUSE_MOVED genuinely
+		// carries no "modifiers" field, unlike the other four input hooks
+		// (see hs_view.h's MODIFIERS note). Modifiers.Current is exactly
+		// the fallback that note describes for a case like this one.
+		_lastModifiers = Modifiers.Current;
 
 		// Only log the Entered/Exited transitions to the console -- plain
 		// in-view movement fires this hook continuously and would flood
@@ -94,17 +105,19 @@ public class DemoView : View
 		Invalidate();
 	}
 
-	protected override void OnKeyDown(byte[] bytes)
+	protected override void OnKeyDown(byte[] bytes, ModifierKeys modifiers)
 	{
 		_lastKeyDown = Describe(bytes);
-		Console.WriteLine("[6] KeyDown: " + _lastKeyDown);
+		_lastModifiers = modifiers;
+		Console.WriteLine("[6] KeyDown: " + _lastKeyDown + ", modifiers=" + modifiers);
 		Invalidate();
 	}
 
-	protected override void OnKeyUp(byte[] bytes)
+	protected override void OnKeyUp(byte[] bytes, ModifierKeys modifiers)
 	{
 		_lastKeyUp = Describe(bytes);
-		Console.WriteLine("[6] KeyUp: " + _lastKeyUp);
+		_lastModifiers = modifiers;
+		Console.WriteLine("[6] KeyUp: " + _lastKeyUp + ", modifiers=" + modifiers);
 		Invalidate();
 	}
 
@@ -152,7 +165,9 @@ public class DemoView : View
 			new Point(10, 68));
 		DrawString("Last key down: " + _lastKeyDown, new Point(10, 86));
 		DrawString("Last key up: " + _lastKeyUp, new Point(10, 104));
-		DrawString("(this view has keyboard focus -- just type)", new Point(10, 130));
+		DrawString("Modifiers held: " + _lastModifiers, new Point(10, 122));
+		DrawString("(this view has keyboard focus -- just type, try holding Shift/Ctrl/Option/Command)",
+			new Point(10, 148));
 	}
 
 	private static string Describe(Point point)

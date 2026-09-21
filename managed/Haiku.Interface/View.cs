@@ -120,9 +120,11 @@ namespace Haiku.Interface
 		/// pressed while the pointer is over this view. <paramref
 		/// name="buttons"/> is the full set of buttons down at that instant
 		/// (see <see cref="MouseButtons"/>), not just the one that triggered
-		/// this event. Default: does nothing.
+		/// this event. <paramref name="modifiers"/> is the Shift/Control/
+		/// Option/Command/... state at that instant (see
+		/// <see cref="ModifierKeys"/>). Default: does nothing.
 		/// </summary>
-		protected virtual void OnMouseDown(Point where, MouseButtons buttons) { }
+		protected virtual void OnMouseDown(Point where, MouseButtons buttons, ModifierKeys modifiers) { }
 
 		/// <summary>
 		/// Called on the owning window's thread when a mouse button is
@@ -131,16 +133,23 @@ namespace Haiku.Interface
 		/// buttons parameter here -- B_MOUSE_UP messages carry no "buttons"
 		/// field at all (verified against the Be Book's message-constants
 		/// documentation, not assumed; see hs_view.h's MOUSE AND KEYBOARD
-		/// INPUT note). Default: does nothing.
+		/// INPUT note). It DOES carry a modifiers field though -- the
+		/// asymmetry runs the other way for that one (see hs_view.h's
+		/// MODIFIERS note), so <paramref name="modifiers"/> is here same as
+		/// <see cref="OnMouseDown"/>. Default: does nothing.
 		/// </summary>
-		protected virtual void OnMouseUp(Point where) { }
+		protected virtual void OnMouseUp(Point where, ModifierKeys modifiers) { }
 
 		/// <summary>
 		/// Called on the owning window's thread whenever the mouse moves
 		/// over this view, including entering/exiting it (see <paramref
 		/// name="transit"/>). <paramref name="buttons"/> is whatever buttons
-		/// are currently down (commonly none, for a plain hover). Default:
-		/// does nothing.
+		/// are currently down (commonly none, for a plain hover). No
+		/// modifiers parameter here -- B_MOUSE_MOVED genuinely carries no
+		/// "modifiers" field, unlike OnMouseDown/OnMouseUp/OnKeyDown/
+		/// OnKeyUp (see hs_view.h's MODIFIERS note); use
+		/// <see cref="Modifiers.Current"/> instead if you need it here.
+		/// Default: does nothing.
 		/// </summary>
 		protected virtual void OnMouseMoved(Point where, MouseTransit transit, MouseButtons buttons) { }
 
@@ -150,12 +159,13 @@ namespace Haiku.Interface
 		/// raw byte sequence Haiku delivered (already copied out of the
 		/// native borrowed pointer) -- see <see cref="KeyBytes"/> for the
 		/// common single-byte control characters, e.g. Escape/Backspace/the
-		/// arrow keys. Default: does nothing.
+		/// arrow keys. <paramref name="modifiers"/> is the Shift/Control/
+		/// Option/Command/... state at that instant. Default: does nothing.
 		/// </summary>
-		protected virtual void OnKeyDown(byte[] bytes) { }
+		protected virtual void OnKeyDown(byte[] bytes, ModifierKeys modifiers) { }
 
-		/// <summary>Called on the owning window's thread when a key is released while this view <see cref="IsFocus"/>. Same <paramref name="bytes"/> semantics as <see cref="OnKeyDown"/>. Default: does nothing.</summary>
-		protected virtual void OnKeyUp(byte[] bytes) { }
+		/// <summary>Called on the owning window's thread when a key is released while this view <see cref="IsFocus"/>. Same <paramref name="bytes"/>/<paramref name="modifiers"/> semantics as <see cref="OnKeyDown"/>. Default: does nothing.</summary>
+		protected virtual void OnKeyUp(byte[] bytes, ModifierKeys modifiers) { }
 
 		/// <summary>
 		/// Adds child to the end of this view's child list. See
@@ -351,14 +361,14 @@ namespace Haiku.Interface
 			view.OnDraw(new Rect(updateRect.Left, updateRect.Top, updateRect.Right, updateRect.Bottom));
 		}
 
-		private static void MouseDownThunk(IntPtr userData, HsPoint where, uint buttons)
+		private static void MouseDownThunk(IntPtr userData, HsPoint where, uint buttons, uint modifiers)
 		{
-			FromUserData(userData).OnMouseDown(FromHsPoint(where), (MouseButtons)buttons);
+			FromUserData(userData).OnMouseDown(FromHsPoint(where), (MouseButtons)buttons, (ModifierKeys)modifiers);
 		}
 
-		private static void MouseUpThunk(IntPtr userData, HsPoint where)
+		private static void MouseUpThunk(IntPtr userData, HsPoint where, uint modifiers)
 		{
-			FromUserData(userData).OnMouseUp(FromHsPoint(where));
+			FromUserData(userData).OnMouseUp(FromHsPoint(where), (ModifierKeys)modifiers);
 		}
 
 		private static void MouseMovedThunk(IntPtr userData, HsPoint where, uint transit, uint buttons)
@@ -370,14 +380,14 @@ namespace Haiku.Interface
 		// INPUT note) -- copied into a managed byte[] immediately via
 		// Marshal.Copy, same borrowed-pointer-copy-immediately convention
 		// used elsewhere in this binding (e.g. Message.FindString).
-		private static void KeyDownThunk(IntPtr userData, IntPtr bytes, int numBytes)
+		private static void KeyDownThunk(IntPtr userData, IntPtr bytes, int numBytes, uint modifiers)
 		{
-			FromUserData(userData).OnKeyDown(CopyBytes(bytes, numBytes));
+			FromUserData(userData).OnKeyDown(CopyBytes(bytes, numBytes), (ModifierKeys)modifiers);
 		}
 
-		private static void KeyUpThunk(IntPtr userData, IntPtr bytes, int numBytes)
+		private static void KeyUpThunk(IntPtr userData, IntPtr bytes, int numBytes, uint modifiers)
 		{
-			FromUserData(userData).OnKeyUp(CopyBytes(bytes, numBytes));
+			FromUserData(userData).OnKeyUp(CopyBytes(bytes, numBytes), (ModifierKeys)modifiers);
 		}
 
 		private static byte[] CopyBytes(IntPtr source, int length)

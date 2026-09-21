@@ -135,7 +135,8 @@ public:
 	virtual void MouseDown(BPoint where)
 	{
 		if (fMouseDownCallback != NULL)
-			fMouseDownCallback(fMouseDownUserData, ToHsPoint(where), CurrentButtons());
+			fMouseDownCallback(fMouseDownUserData, ToHsPoint(where), CurrentButtons(),
+				CurrentModifiers());
 		else
 			BView::MouseDown(where);
 	}
@@ -144,9 +145,12 @@ public:
 	{
 		/* No buttons parameter here -- see hs_view.h's MOUSE AND KEYBOARD
 		 * INPUT note for why B_MOUSE_UP genuinely carries no "buttons"
-		 * field to read, unlike MouseDown/MouseMoved. */
+		 * field to read, unlike MouseDown/MouseMoved. It DOES carry a
+		 * "modifiers" field though (the MODIFIERS note's asymmetry runs
+		 * the other way from the buttons one), so this gets
+		 * CurrentModifiers() where it gets no CurrentButtons(). */
 		if (fMouseUpCallback != NULL)
-			fMouseUpCallback(fMouseUpUserData, ToHsPoint(where));
+			fMouseUpCallback(fMouseUpUserData, ToHsPoint(where), CurrentModifiers());
 		else
 			BView::MouseUp(where);
 	}
@@ -154,7 +158,11 @@ public:
 	virtual void MouseMoved(BPoint where, uint32 transit, const BMessage* dragMessage)
 	{
 		/* dragMessage is always NULL here in this slice -- no drag & drop
-		 * support yet (see hs_view.h). */
+		 * support yet (see hs_view.h). No CurrentModifiers() call here --
+		 * see hs_view.h's MODIFIERS note: B_MOUSE_MOVED genuinely carries
+		 * no "modifiers" field, unlike MouseDown/MouseUp/KeyDown/KeyUp.
+		 * Callers who need modifier state here call hs_modifiers()
+		 * directly instead. */
 		if (fMouseMovedCallback != NULL) {
 			fMouseMovedCallback(fMouseMovedUserData, ToHsPoint(where),
 				static_cast<uint32_t>(transit), CurrentButtons());
@@ -166,7 +174,7 @@ public:
 	virtual void KeyDown(const char* bytes, int32 numBytes)
 	{
 		if (fKeyDownCallback != NULL)
-			fKeyDownCallback(fKeyDownUserData, bytes, numBytes);
+			fKeyDownCallback(fKeyDownUserData, bytes, numBytes, CurrentModifiers());
 		else
 			BView::KeyDown(bytes, numBytes);
 	}
@@ -174,7 +182,7 @@ public:
 	virtual void KeyUp(const char* bytes, int32 numBytes)
 	{
 		if (fKeyUpCallback != NULL)
-			fKeyUpCallback(fKeyUpUserData, bytes, numBytes);
+			fKeyUpCallback(fKeyUpUserData, bytes, numBytes, CurrentModifiers());
 		else
 			BView::KeyUp(bytes, numBytes);
 	}
@@ -251,6 +259,23 @@ private:
 		int32 buttons = 0;
 		message->FindInt32("buttons", &buttons);
 		return static_cast<uint32_t>(buttons);
+	}
+
+	/* Same mechanism as CurrentButtons() above, pulling "modifiers"
+	 * instead of "buttons" -- see hs_view.h's MODIFIERS note for which
+	 * four hooks actually have this field to read (MouseMoved doesn't,
+	 * so it never calls this). */
+	uint32_t CurrentModifiers()
+	{
+		BWindow* window = Window();
+		if (window == NULL)
+			return 0;
+		BMessage* message = window->CurrentMessage();
+		if (message == NULL)
+			return 0;
+		int32 modifiers = 0;
+		message->FindInt32("modifiers", &modifiers);
+		return static_cast<uint32_t>(modifiers);
 	}
 
 	hs_view_attached_to_window_callback	fAttachedToWindowCallback;
@@ -457,4 +482,10 @@ void hs_view_make_focus(hs_handle view, bool focus)
 bool hs_view_is_focus(hs_handle view)
 {
 	return static_cast<HSView*>(view)->IsFocus();
+}
+
+
+uint32_t hs_modifiers(void)
+{
+	return static_cast<uint32_t>(modifiers());
 }

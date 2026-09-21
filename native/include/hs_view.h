@@ -105,6 +105,27 @@
  * already locked for you, same as the DRAWING note above) -- calling it
  * from an unrelated foreign thread needs the same LockLooper()/
  * UnlockLooper() this slice doesn't cover yet.
+ *
+ * MODIFIERS: A THIRD ASYMMETRY, THE MIRROR IMAGE OF THE buttons ONE ABOVE
+ * ---------------------------------------------------------------------------
+ * Same "checked the Be Book field listings, not assumed" rigor as the
+ * buttons asymmetry above turned up a second one, in the opposite
+ * direction: B_MOUSE_DOWN, B_MOUSE_UP, B_KEY_DOWN, and B_KEY_UP all carry
+ * a "modifiers" int32 field (the current Shift/Control/Option/Command/...
+ * state), but **B_MOUSE_MOVED does not carry one at all** -- unlike the
+ * buttons field, which MouseMoved DOES get. This isn't an oversight in
+ * BeOS's original message design: MouseMoved fires continuously while the
+ * pointer moves, at real hardware-event volume, and modifier state is
+ * cheaply available anytime via the standalone modifiers() global
+ * function (see hs_modifiers() below) -- there was no need to fatten
+ * every single MouseMoved message with a field that's already trivial to
+ * query directly. So hs_view_mouse_down_callback/mouse_up/key_down/key_up
+ * all gain a `modifiers` parameter (pulled from Window()->CurrentMessage(),
+ * same mechanism as CurrentButtons()), but
+ * hs_view_mouse_moved_callback deliberately does not -- callers who need
+ * modifier state during a mouse-moved handler call hs_modifiers()
+ * instead, same as any other code that isn't inside one of the four hooks
+ * that get it for free.
  */
 #ifndef HS_VIEW_H
 #define HS_VIEW_H
@@ -130,14 +151,15 @@ typedef void (*hs_view_destroyed_callback)(void* user_data);
  * copy it immediately if you need it afterward, same rule as any other
  * borrowed pointer in this binding (e.g. Message.FindString). */
 typedef void (*hs_view_mouse_down_callback)(void* user_data, hs_point where,
-	uint32_t buttons);
-typedef void (*hs_view_mouse_up_callback)(void* user_data, hs_point where);
+	uint32_t buttons, uint32_t modifiers);
+typedef void (*hs_view_mouse_up_callback)(void* user_data, hs_point where,
+	uint32_t modifiers);
 typedef void (*hs_view_mouse_moved_callback)(void* user_data, hs_point where,
 	uint32_t transit, uint32_t buttons);
 typedef void (*hs_view_key_down_callback)(void* user_data, const char* bytes,
-	int32_t num_bytes);
+	int32_t num_bytes, uint32_t modifiers);
 typedef void (*hs_view_key_up_callback)(void* user_data, const char* bytes,
-	int32_t num_bytes);
+	int32_t num_bytes, uint32_t modifiers);
 
 /* Create a new HSView (a BView subclass) with the given frame, name,
  * resizing mode (the raw B_FOLLOW_* bitmask from View.h), and flags (the
@@ -224,6 +246,18 @@ void hs_view_invalidate(hs_handle view);
  * doesn't gate this. */
 void hs_view_make_focus(hs_handle view, bool focus);
 bool hs_view_is_focus(hs_handle view);
+
+/* Wraps the global modifiers() function from InterfaceDefs.h -- the
+ * current Shift/Control/Option/Command/CapsLock/... state, queryable at
+ * any time, not just from inside one of the four hooks above that get it
+ * for free (see the MODIFIERS note above, especially for
+ * hs_view_mouse_moved_callback, which doesn't). Not really "about" any
+ * particular view -- it lives here rather than in a dedicated
+ * hs_interface_defs.h because this is the only place it's needed so far
+ * and there's no such file yet. Safe to call from any thread: it's a
+ * simple read of shared input-server state, not something that needs a
+ * locked BWindow the way drawing calls do. */
+uint32_t hs_modifiers(void);
 
 #ifdef __cplusplus
 }
