@@ -85,23 +85,28 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, and BView's "shell + drawing + basic input" slices)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control)
 
-Four slices so far: `BWindow` (the first), a second, deliberately
+Five slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
 the round trip (colors, `FillRect`/`StrokeRect`/`StrokeLine`, `DrawString`)
 -- a third: basic mouse/keyboard input on top of that same `BView`
 (`MouseDown`/`MouseUp`/`MouseMoved`, `KeyDown`/`KeyUp`, `MakeFocus`/
-`IsFocus`) -- and now a fourth: modifier-key state (Shift/Ctrl/Option/
-Command) delivered alongside `OnMouseDown`/`OnMouseUp`/`OnKeyDown`/
-`OnKeyUp`, plus a standalone `Modifiers.Current` accessor for everywhere
-else (`OnMouseMoved` included -- see "BView input" below for why that hook
-doesn't get one of its own). `GetMouse()` polling, drag & drop, and
-layout/`FrameResized`/`FrameMoved` are deferred to a follow-up slice -- see
-"Not yet covered" below. This kit lives in its own assembly,
-`Haiku.Interface.dll` (referencing `Haiku.App.dll` for
+`IsFocus`) -- a fourth: modifier-key state (Shift/Ctrl/Option/Command)
+delivered alongside `OnMouseDown`/`OnMouseUp`/`OnKeyDown`/`OnKeyUp`, plus a
+standalone `Modifiers.Current` accessor for everywhere else (`OnMouseMoved`
+included -- see "BView input" below for why that hook doesn't get one of
+its own) -- and now a fifth: `Button`/`Control`, this binding's first
+`BControl`-derived widget, with a direct `OnClick` hook rather than
+BeAPI's own `BMessage`/`BInvoker`/target plumbing (see "Button/Control"
+below for that scope decision, the shared `ViewBase` refactor it required,
+and the ABI-offset fact that refactor rests on). `GetMouse()` polling,
+drag & drop, layout/`FrameResized`/`FrameMoved`, and every other
+`BControl`-derived widget (checkbox, radio button, ...) are deferred to a
+follow-up slice -- see "Not yet covered" below. This kit lives in its own
+assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
 `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
 future kits (Storage, etc.) to also get their own assembly.
@@ -119,13 +124,21 @@ future kits (Storage, etc.) to also get their own assembly.
 - `Haiku.Interface.WindowLook`/`WindowFeel`/`WindowFlags` -- Haiku's own
   `window_look`/`window_feel`/flags enums, values copied verbatim from
   `headers/os/interface/Window.h`.
+- `Haiku.Interface.ViewBase` -- new abstract base as of the Button/Control
+  slice, shared by `View` and `Control` (see "Button/Control" below for
+  why this split exists and what it does and doesn't cover). Holds
+  `Frame`/`MoveTo`/`ResizeTo`, `Dispose()`/ownership enforcement, and the
+  parenting bookkeeping `Window.AddChild`/`RemoveChild` and
+  `View.AddChild`/`RemoveChild` both now accept (`ViewBase`, not `View`
+  -- a `Control`/`Button` can be added anywhere a plain `View` could be).
 - `Haiku.Interface.View` -- wraps a native `BView` subclass (`HSView`, in
-  `native/`). Override `OnAttachedToWindow`, `OnDetachedFromWindow`,
-  `OnDraw`, `OnDestroyed`, `OnMouseDown`/`OnMouseUp`/`OnMouseMoved`,
-  `OnKeyDown`/`OnKeyUp`. `AddChild`/`RemoveChild` (nested views),
-  `Frame`/`Bounds`, `MoveTo`/`ResizeTo`, `SetHighColor`/`SetLowColor`/
-  `SetViewColor`, `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`,
-  `MakeFocus`/`IsFocus`, `Invalidate`. See "BView: no thread of its own,
+  `native/`), deriving from `ViewBase`. Override `OnAttachedToWindow`,
+  `OnDetachedFromWindow`, `OnDraw`, `OnDestroyed`, `OnMouseDown`/
+  `OnMouseUp`/`OnMouseMoved`, `OnKeyDown`/`OnKeyUp`. `AddChild`/
+  `RemoveChild` (nested views/controls), `Bounds`, `SetHighColor`/
+  `SetLowColor`/`SetViewColor`, `FillRect`/`StrokeRect`/`StrokeLine`/
+  `DrawString`, `MakeFocus`/`IsFocus`, `Invalidate` (on top of `ViewBase`'s
+  shared `Frame`/`MoveTo`/`ResizeTo`). See "BView: no thread of its own,
   and stricter ownership" and "BView input" below before touching
   `View.cs` or `hs_view.cpp` -- and see
   [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding an automated
@@ -167,15 +180,35 @@ future kits (Storage, etc.) to also get their own assembly.
   `modifiers()` global function, for reading modifier-key state from
   `OnMouseMoved` or anywhere else outside the four hooks above (a timer,
   `OnDraw`, ...). Safe to call from any thread; see "BView input" below.
+- `Haiku.Interface.Control` -- new abstract base for `BControl`-derived
+  widgets, deriving from `ViewBase` (NOT `View` -- see "Button/Control"
+  below for why). `Label`/`Value`/`IsEnabled`, all plain C# properties
+  (matching `Window.Title`'s precedent, not `View.MakeFocus`/`IsFocus`'s
+  two-separate-members shape -- see the doc comment atop `Control.cs`).
+- `Haiku.Interface.Button` -- wraps a native `BButton` subclass
+  (`HSButton`, in `native/`), deriving from `Control`. `OnClick` (a direct
+  hook, no `BMessage`/target involved), `MakeDefault`/`IsDefault`,
+  `IsFlat`, `Behavior`. See "Button/Control" below before touching
+  `Button.cs`, `Control.cs`, or `hs_button.cpp`.
+- `Haiku.Interface.ButtonBehavior` -- Haiku's `BButton::BBehavior`
+  (`B_BUTTON_BEHAVIOR`/`B_TOGGLE_BEHAVIOR`/`B_POP_UP_BEHAVIOR`), a plain
+  sequential enum (0/1/2), verified against the actual installed
+  `Button.h`. Deliberately NOT a `[Flags]` enum -- mutually exclusive
+  behaviors, same shape as `MouseTransit`. `PopUpMenu` is included for
+  enum parity but isn't fully usable through this binding yet -- see its
+  own doc comment.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
 identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
 beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
-DRAWING note), and `AddChild`'s `before` (insert position) parameter --
-deliberately deferred to a follow-up slice rather than folded into this
-one. Also not yet covered: everything else in Interface Kit (~50 other
-classes), `BScreen`, `BDirectWindow`.
+DRAWING note), `AddChild`'s `before` (insert position) parameter, any
+`BControl`-derived widget other than `Button` (checkbox, radio button,
+slider, ...), and any real `BMessage`/`BInvoker`/target-based invocation
+(`Button`'s `OnClick` is a direct callback instead -- see "Button/Control"
+below) -- deliberately deferred to a follow-up slice rather than folded
+into this one. Also not yet covered: everything else in Interface Kit
+(~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -415,6 +448,116 @@ have physical or remote-desktop access to the Haiku machine, `Sample.exe`'s
 `DemoView` is written so that just interacting with it IS the
 verification.
 
+## Button/Control: a direct OnClick hook, a shared ViewBase, and an ABI fact verified on hardware
+
+`Button` is this binding's first `BControl`-derived widget, and it forced
+two real design decisions plus one thing that had to be verified on real
+hardware rather than assumed, all covered here.
+
+**Why `OnClick` instead of BeAPI's own `BMessage`/`BInvoker`/target
+plumbing.** Real BeAPI delivers a click by having `BControl` (via its
+second base, `BInvoker`) post a `BMessage` to a target `Handler`/`Looper`
+(the owning `BWindow`, by default) when `Invoke()` runs -- the same
+message-passing shape `Window.OnMessageReceived` already exists for. This
+binding does not expose any of that for `Button`: `hs_button_create()`
+always constructs the underlying `BButton` with a `NULL` `BMessage*`, and
+`HSButton` overrides `Invoke()` itself to fire a plain callback directly
+instead (see `hs_button.h`'s "NO BMessage/BInvoker/TARGET PLUMBING" note).
+`Button.OnClick()` is a direct virtual hook, matching the C#-idiomatic
+style `View`'s own hooks (`OnMouseDown`/`OnDraw`/...) already established,
+rather than requiring a `BMessage` and a `Window.OnMessageReceived`
+override for the common one-button case. This was a deliberate scope
+decision, made before writing any code (see this project's own history
+for how "which hooks get which parameters" questions get resolved) --
+the tradeoff is that `ButtonBehavior.PopUpMenu` (which needs a configured
+pop-up `BMessage` to have anything to show) isn't fully usable through
+this binding yet; it's included in the enum for parity, not because it
+works end to end.
+
+**Why `ViewBase` exists.** `View`'s constructor always calls
+`hs_view_create()` and its `Dispose()` always calls `hs_view_destroy()`
+-- neither can be reused as-is for a `Button`, whose native handle comes
+from `hs_button_create()`/`hs_button_destroy()` instead. Calling
+`hs_view_destroy()` on a button handle would `delete` through a
+mismatched static type -- genuine undefined behavior, not just a style
+mistake, since `HSView` and `HSButton` are unrelated concrete classes
+that just happen to share `BView` as a common ancestor. `ViewBase` is the
+new shared abstract root that holds exactly what's safe and meaningful
+for ANY concrete native view/control handle -- `Frame`/`MoveTo`/
+`ResizeTo`, the destroyed-callback/`GCHandle` bookkeeping, and
+`Dispose()`'s ownership enforcement, built around a `protected abstract
+DestroyNativeHandle(IntPtr)` seam each subclass fills in (`View.cs` calls
+`hs_view_destroy()`, `Control.cs` calls `hs_button_destroy()`). `View`
+keeps everything `ViewBase` doesn't cover (`Draw`, the mouse/keyboard
+hooks, `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`, `MakeFocus`/
+`IsFocus`, `Invalidate`, `Bounds`) -- `Control` never inherits any of
+that, because the native shim never wires up `hs_view_set_*_callback()`
+for a button's handle in the first place (a native `BButton` draws and
+handles input entirely on its own; there is nothing for those callbacks
+to report). `Window.AddChild`/`RemoveChild` and `View.AddChild`/
+`RemoveChild` now all accept `ViewBase`, so a `Control`/`Button` can be
+added anywhere a plain `View` could be -- verified by
+`ButtonTests.AddChildUnderWindowSucceeds` AND
+`AddChildUnderPlainViewSucceeds` (a `Button` nested inside a plain `View`,
+not just directly under a `Window`).
+
+**The ABI fact that reuse rests on, verified on hardware.** `Frame`/
+`MoveTo`/`ResizeTo` (in `ViewBase`) and `AddChild`/`RemoveChild`'s child
+parameter (in `hs_view.cpp`) all cast the opaque handle straight to
+`BView*`, regardless of whether the real object behind it is an `HSView`
+or an `HSButton` -- safe only because every class in both chains inherits
+`BView` as its first, non-virtual base, which the Itanium C++ ABI this
+binding builds under places at offset 0. That's true for `HSView`
+(documented in `hs_window.cpp` since the mouse/keyboard slice), but
+`BControl` -- `BButton`'s parent -- uses MULTIPLE inheritance
+(`class BControl : public BView, public BInvoker`), so it needed its own
+check rather than assuming the same reasoning carried over. A small
+native probe (construct a real `HSButtonProbe`, `static_cast` it to each
+base, print the resulting addresses) was compiled and run on the actual
+Haiku box before any of this binding's own code relied on the answer:
+
+```
+HSButtonProbe*  = 0x7707dc9380
+as BView*       = 0x7707dc9380 (offset 0)
+as BControl*    = 0x7707dc9380 (offset 0)
+as BButton*     = 0x7707dc9380 (offset 0)
+as BInvoker*    = 0x7707dc9490 (offset 272)
+reinterpret_cast<BView*>(void*) == static_cast<BView*>(button): MATCH
+```
+
+`BView` (and `BControl`, and `BButton`) all sit at offset 0 -- `BInvoker`,
+`BControl`'s OTHER base, sits at a nonzero offset instead, which is
+exactly why this binding never touches `BInvoker` through a blind handle
+cast (there is no safe way to reach it that way, and nothing in this
+binding needs to -- see the `OnClick` note above). The last line confirms
+the actual pattern `hs_view_add_child()`/`hs_window_add_child()`/
+`ViewBase`'s geometry functions all use -- a blind `reinterpret_cast` on
+the raw opaque handle -- lands on exactly the same address a properly
+computed `static_cast` would. `hs_view_get_bounds()` was deliberately
+NOT extended this way (nothing needs a control's own `Bounds()` yet), and
+neither were `FillRect`/`StrokeRect`/`StrokeLine`/`DrawString`/any
+`hs_view_set_*_callback()` -- the latter genuinely would be unsafe against
+an `HSButton` handle (they write to `HSView`-specific fields that don't
+exist at that layout on a real `HSButton` object), not just meaningless.
+
+**Verification.** `ButtonTests.cs` (module `BButton`) covers everything
+that doesn't need a real click: construction/geometry (through
+`ViewBase`), `Label`/`Value`/`IsEnabled`/`IsDefault`/`IsFlat`/`Behavior`
+round-tripping, the `ButtonBehavior` enum's exact values, and the same
+ownership/parenting rules `ViewTests.cs` already covers for `View`
+(`AddChild`/`RemoveChild`, `Dispose()`-while-attached throwing, cascade-
+on-parent-destroy) -- re-verified here since `Button` now goes through
+`ViewBase` instead of duplicating `View`'s own implementation. Real click-
+firing has no automated coverage, same reasoning as every other input
+hook in this binding (see `ButtonTests.cs`'s own class remarks) --
+verified instead by running `Sample.exe`'s `DemoButton` (a real "Click
+Me" button beneath `DemoView` that updates its own label with a running
+click count and disables itself after three clicks, to make `IsEnabled`'s
+effect visible on screen) and confirmed with a real screenshot on the
+Haiku box (`screenshot -s -f png`, run silently to avoid the interactive
+save dialog blocking over SSH) showing the button rendered correctly,
+positioned beneath `DemoView` with the expected native 3D-bevel look.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -449,14 +592,17 @@ sitting at Haiku's own Terminal or running this over SSH.)
 it shows a real `BWindow` containing a `DemoView` that actually draws
 something (a filled/stroked rect and a line of text, via real `BeAPI`
 calls), takes keyboard focus and tracks mouse/keyboard input live (see
-"BView input" above), and waits for you to close it (its title bar's close
-box), at which point `WindowFlags.QuitOnWindowClose` signals the owning
-`BApplication` to quit too. Expected output:
+"BView input" above), a real `DemoButton` ("Click Me") beneath it that
+updates its own label with a running click count and disables itself
+after three clicks (see "Button/Control" above), and waits for you to
+close it (its title bar's close box), at which point
+`WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
+too. Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it or type, close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, or click the button, close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -474,6 +620,15 @@ holding Shift/Ctrl/Option/Command while moving the mouse or typing -- that
 interaction is the actual verification for this slice's mouse/keyboard/
 modifier hooks, since (per "BView input" above) there's no automated or
 synthetic way to fire them in this project's environment.
+
+Clicking the "Click Me" button prints `[7] DemoButton clicked, count=N`
+and updates the button's own label to "Clicked N times" -- after the
+third click it prints an additional `[7] DemoButton disabled itself
+(IsEnabled = false) after the 3rd click.` line, changes its label to
+"Disabled after 3 clicks", and visibly grays out (a real `BButton`'s own
+disabled rendering, not anything this binding draws itself). That's the
+actual verification for `OnClick`/`IsEnabled`, since (per "Button/Control"
+above) there's no automated or synthetic way to fire a real click either.
 
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
@@ -538,13 +693,18 @@ left on screen BEFORE that test runs, with its result appended once known:
   AddChildFiresAttachedToWindowSynchronously ... PASS
   ...
 
+== BButton ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  LabelRoundTrips ... PASS
+  ...
+
 == Interface Kit ==
   QuitPostsRequestAndFiresDestroyedCallback ... PASS
 
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-50 passed, 0 failed, 0 errored
+64 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -565,7 +725,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Five modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Six modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -588,6 +748,18 @@ today:
   `OnMouseUp`/`OnMouseMoved`/`OnKeyDown`/`OnKeyUp`, or one that asserts a
   particular `ModifierKeys`/`Modifiers.Current` bit is set -- read that
   file's class remarks and "BView input" above before trying to add one.
+- `BButton` (class `ButtonTests`) -- construction/geometry (through
+  `ViewBase`), `Label`/`Value`/`IsEnabled`/`IsDefault`/`IsFlat`/`Behavior`
+  round-tripping, the `ButtonBehavior` enum's exact values, and the same
+  `AddChild`/`RemoveChild`/`Dispose()`-while-attached/cascade-on-destroy
+  ownership rules `BView` covers for `View` -- re-verified here for
+  `Button` specifically, including a `Button` nested under a plain `View`
+  (not just directly under a `Window`), since `Button` now goes through
+  the shared `ViewBase` rather than duplicating `View`'s own
+  implementation (see "Button/Control" above). Deliberately does NOT
+  include a test that actually fires `OnClick` -- read
+  `managed/Tests/ButtonTests.cs`'s own class remarks and "Button/Control"
+  above before trying to add one.
 - `Interface Kit` (class `WindowTests`) -- `BWindow`'s `Quit()`/
   `OnDestroyed()` lifecycle (see `managed/Tests/WindowTests.cs`), including
   the poll-with-timeout pattern needed because there's no blocking

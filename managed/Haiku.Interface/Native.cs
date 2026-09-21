@@ -54,6 +54,15 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ViewKeyUpCallback(IntPtr userData, IntPtr bytes, int numBytes, uint modifiers);
 
+	/* Button delegate shapes matching hs_button.h's callback typedefs
+	 * exactly. No BMessage/target involved in ButtonClickCallback -- see
+	 * hs_button.h's "NO BMessage/BInvoker/TARGET PLUMBING" note. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ButtonClickCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ButtonDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -269,5 +278,73 @@ namespace Haiku.Interface
 		 * property, which is what actually calls this. */
 		[DllImport(Lib)]
 		internal static extern uint hs_modifiers();
+
+		/* Button/Control -- see hs_button.h for the full design
+		 * rationale. hs_view_get_frame/move_to/resize_to above are
+		 * reused directly for a button's own handle (see hs_view.cpp's
+		 * comments on those three); there is no separate
+		 * hs_button_get_frame/move_to/resize_to. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_button_create(HsRect frame, string name,
+			string label, uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_destroy(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_click_callback(IntPtr button,
+			ButtonClickCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_destroyed_callback(IntPtr button,
+			ButtonDestroyedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_label(IntPtr button, string label);
+
+		/* Returns a pointer into BControl's own internal storage, same
+		 * borrowed-pointer situation as hs_window_title -- Control.cs's
+		 * Label getter copies it into a managed string immediately via
+		 * Marshal.PtrToStringAnsi, same treatment as Window.Title. This
+		 * is why the return type here is IntPtr, not string -- see
+		 * hs_window_title's own comment just above for why. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_button_label(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_value(IntPtr button, int value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_button_value(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_enabled(IntPtr button,
+			[MarshalAs(UnmanagedType.I1)] bool enabled);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_button_is_enabled(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_make_default(IntPtr button,
+			[MarshalAs(UnmanagedType.I1)] bool isDefault);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_button_is_default(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_flat(IntPtr button,
+			[MarshalAs(UnmanagedType.I1)] bool flat);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_button_is_flat(IntPtr button);
+
+		[DllImport(Lib)]
+		internal static extern void hs_button_set_behavior(IntPtr button, uint behavior);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_button_behavior(IntPtr button);
 	}
 }

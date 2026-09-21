@@ -1,0 +1,133 @@
+/*
+ * hs_button.h -- C shim over BButton (headers/os/interface/Button.h),
+ * layered on top of BControl (headers/os/interface/Control.h).
+ *
+ * Same trampoline shape as hs_view.h/hs_window.h -- read hs_view.h first
+ * if you haven't. This comment covers only what's actually different
+ * about BButton/BControl.
+ *
+ * NO BMessage/BInvoker/TARGET PLUMBING -- A DIRECT CLICK CALLBACK INSTEAD
+ * --------------------------------------------------------------------------
+ * Real BeAPI delivers a click by having BControl (via its second base,
+ * BInvoker) post a BMessage to a target Handler/Looper (the owning
+ * BWindow, by default) when Invoke() runs. This binding does not expose
+ * any of that -- no BMessage is ever constructed, no target/Looper is
+ * ever set. Instead, HSButton overrides Invoke() itself (below) to fire
+ * a plain callback directly, synchronously, on whatever thread Invoke()
+ * itself runs on (the same message-loop thread every other View/Control
+ * hook in this binding fires on -- see hs_view.h's threading note).
+ * hs_button_create() always constructs the underlying BButton with a
+ * NULL BMessage*; Invoke()'s inherited BInvoker behavior (posting that
+ * message somewhere) never actually has anything to post, since it's
+ * overridden away entirely before BControl/BInvoker's own logic runs.
+ * This was a deliberate scope decision (BeAPI-faithful message-passing
+ * was considered and rejected as more ceremony than this binding's
+ * C#-idiomatic hook style -- see OnMouseDown/OnDraw/etc. in hs_view.h --
+ * calls for) -- see README.md's "Button: why a direct OnClick hook" for
+ * the full writeup.
+ *
+ * WHY BUTTON DOESN'T GET ITS OWN DRAW/ATTACHED/MOUSE/KEY CALLBACKS
+ * --------------------------------------------------------------------------
+ * Unlike HSView, HSButton does NOT override Draw(), AttachedToWindow(),
+ * DetachedFromWindow(), MouseDown()/MouseUp()/MouseMoved(), or
+ * KeyDown()/KeyUp() -- it lets BButton's own real implementations run
+ * untouched (a native button draws and handles input entirely on its
+ * own; that's the whole point of wrapping the real BButton rather than
+ * hand-rolling one out of a plain View). Only Invoke() (the click) and
+ * the destructor (see hs_view.h's DESTROYED CALLBACK note -- identical
+ * reasoning, identical contract) are overridden here.
+ *
+ * REUSING hs_view_get_frame()/hs_view_move_to()/hs_view_resize_to()
+ * --------------------------------------------------------------------------
+ * There is no hs_button_get_frame()/move_to()/resize_to() -- Button.cs
+ * calls the existing hs_view_* geometry functions directly with its own
+ * handle instead. Verified safe: HSButton's BView subobject sits at
+ * offset 0 (a small native probe on real Haiku hardware confirmed this
+ * empirically for the whole BView/BControl/BButton chain, with BInvoker
+ * -- BControl's OTHER base -- at a nonzero offset instead; see
+ * hs_view.cpp's hs_view_add_child() comment and README.md's Button
+ * section for the probe itself), so casting the opaque handle straight
+ * to BView*, exactly like hs_view_add_child()/hs_window_add_child()
+ * already do, reaches the correct BView subobject regardless of whether
+ * the real object behind the handle is an HSView or an HSButton. This
+ * does NOT extend to hs_view_set_*_callback()/FillRect()/StrokeRect()/
+ * StrokeLine()/DrawString() -- those either touch HSView-specific data
+ * members that don't exist at that layout on an HSButton (genuinely
+ * unsafe, not just meaningless) or are only meaningful inside a real
+ * Draw() callback a Button never receives -- Control.cs/Button.cs never
+ * call any of those, by convention, the same way this binding's
+ * ownership rules are convention-enforced elsewhere rather than typed.
+ *
+ * BCONTROL-LEVEL STATE, IMPLEMENTED DIRECTLY ON HSBUTTON
+ * --------------------------------------------------------------------------
+ * Label/Value/Enabled are BControl-level API, but HSButton is the only
+ * concrete HSView-family control this binding has today, so they're
+ * implemented directly here (hs_button_label(), not hs_control_label())
+ * rather than inventing a shared HSControl base ahead of a second
+ * control actually needing one -- same YAGNI call this binding already
+ * makes elsewhere. Revisit this the day a second BControl-derived
+ * widget (checkbox, radio button, ...) is added.
+ */
+#ifndef HS_BUTTON_H
+#define HS_BUTTON_H
+
+#include "hs_types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef void (*hs_button_click_callback)(void* user_data);
+typedef void (*hs_button_destroyed_callback)(void* user_data);
+
+/* Create a new HSButton (a BButton subclass) with the given frame, name,
+ * label, resizing mode, and flags -- same shape as hs_view_create(). Has
+ * no parent and is not attached to any window yet; safe to configure
+ * from whatever thread created it, same threading rule as hs_view.h's. */
+hs_handle hs_button_create(hs_rect frame, const char* name, const char* label,
+	uint32_t resizing_mode, uint32_t flags);
+
+/* ONLY safe on a button that is not currently attached to a parent --
+ * same OWNERSHIP rule as hs_view_destroy(). Fires the destroyed
+ * callback, same as any other path to this button's destruction. */
+void hs_button_destroy(hs_handle button);
+
+void hs_button_set_click_callback(hs_handle button,
+	hs_button_click_callback callback, void* user_data);
+
+void hs_button_set_destroyed_callback(hs_handle button,
+	hs_button_destroyed_callback callback, void* user_data);
+
+/* BControl-level state -- see the BCONTROL-LEVEL STATE note above. */
+void hs_button_set_label(hs_handle button, const char* label);
+
+/* Returns a pointer into BControl's own internal storage, same borrowed-
+ * pointer situation as hs_window_title() -- copy it into a managed
+ * string immediately, do not hold onto it or free it. */
+const char* hs_button_label(hs_handle button);
+
+void hs_button_set_value(hs_handle button, int32_t value);
+int32_t hs_button_value(hs_handle button);
+
+void hs_button_set_enabled(hs_handle button, bool enabled);
+bool hs_button_is_enabled(hs_handle button);
+
+/* BButton-specific state. */
+void hs_button_make_default(hs_handle button, bool is_default);
+bool hs_button_is_default(hs_handle button);
+
+void hs_button_set_flat(hs_handle button, bool flat);
+bool hs_button_is_flat(hs_handle button);
+
+/* `behavior` is the raw BButton::BBehavior value (B_BUTTON_BEHAVIOR=0,
+ * B_TOGGLE_BEHAVIOR=1, B_POP_UP_BEHAVIOR=2 -- plain sequential enum
+ * values, verified against the actual installed Button.h, not
+ * macro-computed the way ViewResizingMode's B_FOLLOW_* constants are). */
+void hs_button_set_behavior(hs_handle button, uint32_t behavior);
+uint32_t hs_button_behavior(hs_handle button);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* HS_BUTTON_H */

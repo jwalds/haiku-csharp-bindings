@@ -6,7 +6,7 @@ CXX ?= g++
 CXXFLAGS ?= -O2 -fPIC -Wall -Wextra -Iinclude
 LDFLAGS ?= -lbe
 
-SRCS := src/hs_application.cpp src/hs_message.cpp src/hs_window.cpp src/hs_view.cpp
+SRCS := src/hs_application.cpp src/hs_message.cpp src/hs_window.cpp src/hs_view.cpp src/hs_button.cpp
 OBJS := $(SRCS:.cpp=.o)
 TARGET := libhaikusharp.so
 
@@ -17,7 +17,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CXX) -shared -o $@ $(OBJS) $(LDFLAGS)
 
-%.o: %.cpp include/hs_types.h include/hs_message.h include/hs_application.h include/hs_window.h include/hs_view.h
+%.o: %.cpp include/hs_types.h include/hs_message.h include/hs_application.h include/hs_window.h include/hs_view.h include/hs_button.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 clean:

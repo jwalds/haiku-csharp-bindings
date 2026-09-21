@@ -188,8 +188,10 @@ namespace Haiku.Interface
 		/// needs to "become attached" to anything first; see hs_window.h's
 		/// own hs_window_add_child() doc for why this is safe pre-Show()
 		/// specifically (no message-loop thread running yet to race with).
+		/// <paramref name="child"/> may be a plain View or a
+		/// Control/Button (see ViewBase.cs).
 		/// </summary>
-		public void AddChild(View child)
+		public void AddChild(ViewBase child)
 		{
 			CheckNotConsumed();
 			if (child == null)
@@ -204,7 +206,7 @@ namespace Haiku.Interface
 		/// a view's parent is a Window or another View). Returns false if
 		/// child was not actually a direct child of this window.
 		/// </summary>
-		public bool RemoveChild(View child)
+		public bool RemoveChild(ViewBase child)
 		{
 			CheckNotConsumed();
 			if (child == null)

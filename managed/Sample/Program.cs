@@ -6,18 +6,22 @@ using Haiku.Interface;
 /*
  * A minimal, runnable example of this binding's Interface Kit slice: a
  * BWindow you can actually see and close, containing a BView that actually
- * draws something and now also responds to mouse and keyboard input. This
- * is NOT where verification of the binding lives -- see managed/Tests/
- * (built as Tests.exe) for the actual regression suite, including
- * WindowTests.QuitPostsRequestAndFiresDestroyedCallback, ViewTests'
- * construction/attach/detach/ownership coverage, and ViewInputTests'
- * MakeFocus/IsFocus/Invalidate/enum-value coverage, which exercise these
- * same paths without needing a human to look at anything (real hook-firing
- * itself has no automated coverage -- see ViewInputTests.cs's class
- * remarks for why, same reasoning as Draw() itself in KNOWN_ISSUES.md
- * issue #4). This file exists purely to be a clear, working starting point
- * for your own windowed app, and -- for DemoView specifically -- to answer
- * a real open question: see DemoView's OnDraw remarks below.
+ * draws something and responds to mouse and keyboard input, PLUS a real
+ * BButton you can click. This is NOT where verification of the binding
+ * lives -- see managed/Tests/ (built as Tests.exe) for the actual
+ * regression suite, including WindowTests.QuitPostsRequestAndFiresDestroyedCallback,
+ * ViewTests' construction/attach/detach/ownership coverage,
+ * ViewInputTests' MakeFocus/IsFocus/Invalidate/enum-value coverage, and
+ * ButtonTests' Label/Value/IsEnabled/IsDefault/IsFlat/Behavior coverage
+ * (plus the AddChildUnderPlainViewSucceeds/AddChildUnderWindowSucceeds
+ * regressions for the ViewBase refactor Button required), which all
+ * exercise these same paths without needing a human to look at anything.
+ * Real hook-firing -- including a real click -- has no automated coverage
+ * (see ViewInputTests.cs's/ButtonTests.cs's class remarks for why, same
+ * reasoning as Draw() itself in KNOWN_ISSUES.md issue #4). This file
+ * exists purely to be a clear, working starting point for your own
+ * windowed app, and -- for DemoView specifically -- to answer a real open
+ * question: see DemoView's OnDraw remarks below.
  *
  * DemoWindow uses WindowFlags.QuitOnWindowClose, so clicking its title bar's
  * close box doesn't just end the window -- BWindow.h's own flag semantics
@@ -168,6 +172,7 @@ public class DemoView : View
 		DrawString("Modifiers held: " + _lastModifiers, new Point(10, 122));
 		DrawString("(this view has keyboard focus -- just type, try holding Shift/Ctrl/Option/Command)",
 			new Point(10, 148));
+		DrawString("Try the button below too.", new Point(10, 166));
 	}
 
 	private static string Describe(Point point)
@@ -223,6 +228,41 @@ public class DemoView : View
 	}
 }
 
+/*
+ * A real BButton, demonstrating this binding's Button/Control slice:
+ * Label, a direct OnClick hook (see hs_button.h's "NO BMessage/BInvoker/
+ * TARGET PLUMBING" note for why there's no BMessage/target involved), and
+ * IsEnabled -- all three verified interactively here, the same way
+ * DemoView's mouse/keyboard hooks are, since none of them have automated
+ * coverage for the actual event firing (see ButtonTests.cs's class
+ * remarks). Clicking updates this button's own Label to show a running
+ * count, then disables itself after a few clicks to make IsEnabled's
+ * effect visible on screen (a disabled BButton draws visibly grayed out).
+ */
+public class DemoButton : Button
+{
+	private int _clickCount;
+
+	public DemoButton()
+		: base(new Rect(20, 218, 160, 242), "demo button", "Click Me")
+	{
+	}
+
+	protected override void OnClick()
+	{
+		_clickCount++;
+		Console.WriteLine("[7] DemoButton clicked, count=" + _clickCount);
+
+		if (_clickCount >= 3) {
+			Label = "Disabled after 3 clicks";
+			IsEnabled = false;
+			Console.WriteLine("[7] DemoButton disabled itself (IsEnabled = false) after the 3rd click.");
+		} else {
+			Label = "Clicked " + _clickCount + " time" + (_clickCount == 1 ? "" : "s");
+		}
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
@@ -230,6 +270,7 @@ public class DemoWindow : Window
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
+		AddChild(new DemoButton());
 	}
 
 	protected override void OnDestroyed()
@@ -249,7 +290,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it or type, close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, or click the button, close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()

@@ -384,13 +384,29 @@ void hs_view_set_key_up_callback(hs_handle view,
 
 void hs_view_add_child(hs_handle view, hs_handle child)
 {
-	static_cast<HSView*>(view)->AddChild(static_cast<HSView*>(child));
+	/* `child` may be an HSView* OR any other HSView-family handle this
+	 * binding creates (as of the Button/Control slice, that also means
+	 * HSButton* -- see hs_button.cpp). Casting straight to BView*, same
+	 * as hs_window_add_child() already does below, rather than the
+	 * narrower HSView*: every such class inherits BView (directly or,
+	 * for HSButton via BButton -> BControl, transitively) as its first,
+	 * non-virtual base, which the Itanium C++ ABI this binding builds
+	 * under places at offset 0 -- verified empirically with a small
+	 * scratch probe on real Haiku hardware for the HSButton case
+	 * (offsets: BView/BControl/BButton all 0, BInvoker 272 -- see
+	 * KNOWN_ISSUES.md or the Button/Control section of README.md for
+	 * the probe itself), matching the reasoning hs_window_add_child()'s
+	 * own comment already gives for HSView. AddChild()'s signature only
+	 * ever wants a BView*, so this is the correct, minimal cast for
+	 * "any concrete view-family type", not just HSView specifically. */
+	static_cast<HSView*>(view)->AddChild(static_cast<BView*>(child));
 }
 
 
 bool hs_view_remove_child(hs_handle view, hs_handle child)
 {
-	return static_cast<HSView*>(view)->RemoveChild(static_cast<HSView*>(child));
+	/* Same BView* reasoning as hs_view_add_child() just above. */
+	return static_cast<HSView*>(view)->RemoveChild(static_cast<BView*>(child));
 }
 
 
@@ -398,7 +414,11 @@ void hs_view_get_frame(hs_handle view, hs_rect* out_frame)
 {
 	if (out_frame == NULL)
 		return;
-	*out_frame = ToHsRect(static_cast<HSView*>(view)->Frame());
+	/* BView* cast, not the narrower HSView* -- see hs_view_add_child()'s
+	 * comment above. Reused directly by Control.cs/Button.cs (there is
+	 * no separate hs_button_get_frame()) since this only ever touches
+	 * plain inherited BView state. */
+	*out_frame = ToHsRect(static_cast<BView*>(view)->Frame());
 }
 
 
@@ -412,13 +432,17 @@ void hs_view_get_bounds(hs_handle view, hs_rect* out_bounds)
 
 void hs_view_move_to(hs_handle view, float x, float y)
 {
-	static_cast<HSView*>(view)->MoveTo(x, y);
+	/* BView* cast -- same reasoning/reuse note as hs_view_get_frame()
+	 * just above. */
+	static_cast<BView*>(view)->MoveTo(x, y);
 }
 
 
 void hs_view_resize_to(hs_handle view, float width, float height)
 {
-	static_cast<HSView*>(view)->ResizeTo(width, height);
+	/* BView* cast -- same reasoning/reuse note as hs_view_get_frame()
+	 * above. */
+	static_cast<BView*>(view)->ResizeTo(width, height);
 }
 
 

@@ -196,14 +196,23 @@ void hs_view_set_key_up_callback(hs_handle view,
 /* Adds child to the end of view's child list (see the DRAWING note above
  * for why `before` isn't exposed yet). AttachedToWindow() fires on child
  * (and its own descendants, if any) immediately if view is itself already
- * attached to a window -- otherwise it fires later, when view is. */
+ * attached to a window -- otherwise it fires later, when view is. `child`
+ * may be an HSView* or any other HSView-family handle (e.g. HSButton* --
+ * see hs_button.h) -- see hs_view_add_child()'s own comment in
+ * hs_view.cpp for why that's safe. */
 void hs_view_add_child(hs_handle view, hs_handle child);
 
 /* Detaches child from view's child list without deleting it -- see the
  * OWNERSHIP note above. Returns false if child was not actually a child
- * of view. */
+ * of view. Same "any HSView-family handle" note as hs_view_add_child()
+ * applies to child here too. */
 bool hs_view_remove_child(hs_handle view, hs_handle child);
 
+/* hs_view_get_frame()/hs_view_move_to()/hs_view_resize_to() are also
+ * called directly against HSButton handles (see hs_button.h) -- reused
+ * rather than duplicated, since they only ever touch plain inherited
+ * BView state. hs_view_get_bounds() is NOT reused this way (nothing in
+ * the Button/Control slice needs a control's own Bounds() yet). */
 void hs_view_get_frame(hs_handle view, hs_rect* out_frame);
 void hs_view_get_bounds(hs_handle view, hs_rect* out_bounds);
 void hs_view_move_to(hs_handle view, float x, float y);
