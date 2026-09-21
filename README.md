@@ -760,7 +760,11 @@ after three clicks (see "Button/Control" above), a real `DemoTextControl`
 ("Type here:") beneath that which logs every edit and every commit (see
 "TextControl" above), and waits for you to close it (its title bar's
 close box), at which point `WindowFlags.QuitOnWindowClose` signals the
-owning `BApplication` to quit too. Expected output:
+owning `BApplication` to quit too.
+
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, and the DemoTextControl "Type here:" field](screenshots/sample-demo.png)
+
+Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
