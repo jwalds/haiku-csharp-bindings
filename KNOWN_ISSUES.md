@@ -9,11 +9,11 @@ what's been tried. When one of these gets fixed, move it to a "Fixed"
 section at the bottom with the commit that fixed it, rather than deleting
 it -- the investigation is worth keeping even after the bug isn't.
 
-None of these four block using the binding today, including issue 4, whose
-apparent severity turned out to be confined to one specific automated-test
-pattern rather than real app usage -- see its own write-up. All of them are
-corners of the Application/Interface Kit threading model; nothing in
-BMessage is affected.
+None of the three still open below block using the binding today. All of
+them are corners of the Application/Interface Kit threading model; nothing
+in BMessage is affected. (A fourth, `Tests.exe` hanging on a `BView`'s
+first `Draw()` in one specific automated-test pattern, was fixed -- see
+"Fixed" at the bottom.)
 
 ---
 
@@ -221,6 +221,46 @@ above without ever getting closer to a working fix.
 
 ---
 
+## Fixed
+
+**FIXED** -- see the commit that added this line for the actual change.
+Short version: the fix was exactly the untried approach this issue's own
+"Where to pick this up" note (below) suggested -- build and `Show()` the
+probe window from inside `OnReadyToRun()`, on the same thread that calls
+`Application.Run()`, matching the pattern `Sample.exe`'s `DemoView`
+already proved safe (see the "UPDATE" paragraph below), instead of
+`Show()`ing it from the test method's own thread while `Application` was
+never `Run()` at all.
+
+That could not go back into `ViewTests.cs` where the original attempt
+lived, though: it requires a real `Run()`-to-quit cycle, and issue #1
+above means only ONE test in this entire process may ever run one. That
+slot already belonged to `managed/Tests/ApplicationTests.cs`, so the
+`Draw()` check was folded into that file's existing test instead of added
+as a second one -- see that file's class remarks for the full design,
+including a second, less obvious change it required: the original quit
+trigger (a same-thread PING/PONG message round trip posting
+`QuitRequested` to itself, near-instantly) had to be removed, because
+left in place it would almost certainly have won the race and quit the
+app before `Draw()` ever got a chance to fire on the window's own,
+separate thread. `ProbeDrawView.OnDraw()` is now the only thing that ends
+`Run()`, by calling `Window.Quit()` (documented safe from any thread,
+including the window's own) on a window built with
+`WindowFlags.QuitOnWindowClose` -- the same native BWindow mechanism
+`Sample.exe`'s `DemoWindow` already relied on for its close-box click,
+just triggered programmatically here instead of by a UI event.
+
+Verified on real Haiku hardware: 5 consecutive full `Tests.exe` runs, all
+48 tests passing, no hang, in both the with-warning and without-warning
+variants of issue #3's already-known benign shutdown message (confirming
+that warning is unrelated to this fix, as issue #3 itself already
+concluded). The rest of this entry is kept as-is below for the historical
+investigation -- including the still-unconfirmed root cause of why the
+*original* pattern hung -- since knowing what didn't work, and why, is
+still worth keeping even now that a working alternative exists.
+
+---
+
 ## 4. `Tests.exe` hangs shortly after a BView's first `Draw()` call returns, in one specific usage pattern
 
 **Symptom:** in `managed/Tests/ViewTests.cs`'s `DrawFiresWithSaneUpdateRectAfterShow`
@@ -360,11 +400,8 @@ thread while `Application` sits un-`Run()`. That was never tried during
 this investigation; it might sidestep the hang entirely rather than fix it,
 which would still be enough to safely restore the coverage.
 
-**Where documented in code:** `managed/Tests/ViewTests.cs` (class remarks,
-referencing this issue by number).
+**Where documented in code:** `managed/Tests/ApplicationTests.cs` (class
+remarks -- the fix itself, and the design constraints it had to work
+around). `managed/Tests/ViewTests.cs` (class remarks) explains why the
+automated Draw() test could not simply go back into that file instead.
 
----
-
-## Fixed
-
-*(nothing here yet)*

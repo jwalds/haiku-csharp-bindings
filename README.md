@@ -312,18 +312,24 @@ about-to-be-deleted" gap `BWindow`'s own destroyed-callback works around:
    paths this covers with one `OnDestroyed` hook: explicit `Dispose()`,
    explicit detach-then-dispose, and the implicit cascade).
 
-**A real, currently-open question about `Draw()` and threading was found
-while building this slice -- see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue
-#4.** Short version: one specific automated-test shape (showing a window
-from a thread other than the one running `Application.Run()`, with
+**A real threading question about `Draw()` was found while building this
+slice, and has since been fixed -- see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)
+issue #4.** Short version: one specific automated-test shape (showing a
+window from a thread other than the one running `Application.Run()`, with
 `Application` never `Run()` at all, then polling for `Draw()` from that
 same outside thread) reliably hung the whole test process the first time
-`Draw()` fired, for reasons not yet root-caused. Real app usage -- window
+`Draw()` fired, for reasons never root-caused. Real app usage -- window
 and view built inside `OnReadyToRun()`, same thread that calls `Run()` --
 was separately confirmed NOT to hit this: see `managed/Sample/Program.cs`'s
 `DemoView`, verified both by console output and by an actual screenshot of
-its drawn content. Read issue #4 in full before adding a `Draw()`-firing
-automated test back to `ViewTests.cs`.
+its drawn content. That real-usage pattern turned out to be the fix, not
+just a workaround: `managed/Tests/ApplicationTests.cs` now builds and
+`Show()`s a probe window the same way, and `Draw()` firing with a sane
+update rect is real, automated, `[TestOrder(100)]` coverage today --
+`ViewTests.cs` itself still can't host it directly (see its own class
+remarks and issue #4's "Fixed" write-up for why: only one test in the
+whole process may ever run a full `Run()`-to-quit cycle, per issue #1, and
+`ApplicationTests.cs` already owns that slot).
 
 ## BView input: threading, the MouseUp asymmetry, and what's not covered
 
@@ -531,10 +537,10 @@ today:
   `RemoveChild` and the attach/detach hooks they fire, and the ownership
   rules `Dispose()` enforces (see `managed/Tests/ViewTests.cs`). Every test
   here uses an unshown `Window` (see "BView" above for why that's enough to
-  exercise `AttachedToWindow`/`DetachedFromWindow`). Deliberately does NOT
-  include an automated `Draw()`-firing test -- read that file's class
-  remarks and [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4 before adding
-  one back.
+  exercise `AttachedToWindow`/`DetachedFromWindow`). Does NOT include a
+  `Draw()`-firing test -- that lives in `Application Kit` below instead
+  (see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4's "Fixed" write-up and
+  this file's own class remarks for why it has to live there).
 - `BView Input` (class `ViewInputTests`) -- `MakeFocus`/`IsFocus`
   round-tripping, `Invalidate()` not throwing, and the `MouseButtons`/
   `MouseTransit`/`KeyBytes` values themselves (see
@@ -550,10 +556,18 @@ today:
   see "BWindow" above.
 - `Application Kit` (class `ApplicationTests`) -- the threading proof from
   "The open question" above, as an actual regression test rather than
-  something you verify by eye. Slower and less isolated than a
+  something you verify by eye, PLUS this project's only automated `Draw()`
+  -firing test (see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4): a probe
+  window and view are built inside `OnReadyToRun()`, on the same thread
+  that calls `Run()`, and the view's own `OnDraw()` is what ends the test
+  by calling `Window.Quit()` on a window built with
+  `WindowFlags.QuitOnWindowClose`. Slower and less isolated than a
   `MessageTests` case (it spins up a real `BApplication` and blocks on a
   real native message loop), and -- per the one-shot constraint above --
-  must stay `[TestOrder(100)]` (last).
+  must stay `[TestOrder(100)]` (last); this is also why the `Draw()` check
+  had to be folded into this one test rather than added as a second one:
+  issue #1 means only one full `Run()`-to-quit cycle may ever happen in
+  this process.
 
 There is no NUnit (or any test framework) anywhere in this Mono 6.14.1
 port's actual installed GAC, and no realistic way to get one: modern

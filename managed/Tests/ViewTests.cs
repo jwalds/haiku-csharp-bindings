@@ -32,16 +32,27 @@ using Haiku.Testing;
 /// simple and fast. None of the tests here override OnQuitRequested or
 /// OnDestroyed on the window itself either.
 ///
-/// THERE IS NO AUTOMATED Draw() TEST HERE. There used to be one
-/// (a ProbeView overriding OnDraw, added to a Show()n window, polled for a
-/// DrawFired flag); it reliably hung the whole Tests.exe process shortly
-/// after OnDraw() fired for the first time -- not a flaky failure, a hang,
-/// which blocks every test after it and never returns an exit code. See
-/// KNOWN_ISSUES.md issue #4 for the full investigation (native Draw()
-/// fires correctly with the right rect; the native-to-managed callback
-/// completes and returns; the hang is somewhere after that, not yet
-/// root-caused). Until that's resolved, Draw() round-tripping is verified
-/// visually instead, via Sample.exe.
+/// THERE IS NO Draw() TEST IN *THIS* FILE. There used to be an attempt
+/// at one here (a ProbeView overriding OnDraw, added to a Show()n window
+/// from this test method's own thread, polled for a DrawFired flag); it
+/// reliably hung the whole Tests.exe process shortly after OnDraw() fired
+/// for the first time -- not a flaky failure, a hang, which blocks every
+/// test after it and never returns an exit code. See KNOWN_ISSUES.md
+/// issue #4 for the full investigation and, since fixed, its resolution:
+/// Draw() now DOES have automated coverage, in
+/// managed/Tests/ApplicationTests.cs, but it could not be added here.
+/// The fix was to build and Show() the probe window from inside
+/// OnReadyToRun(), on the same thread that calls Application.Run() --
+/// exactly the pattern that was already proven safe by Sample.exe -- and
+/// that requires a real Run()-to-quit cycle, which issue #1 (see
+/// KNOWN_ISSUES.md) restricts to exactly one test in this whole process.
+/// ApplicationTests.cs already owned that one slot, so the Draw() check
+/// was folded into its existing test rather than added as a second one
+/// here. Read ApplicationTests.cs's class remarks before attempting to
+/// add a Draw()-firing test to THIS file -- the original hang-prone
+/// shape (Show() from a test method's own thread, Application never
+/// Run()) is still exactly as dangerous as this file's remarks above
+/// describe, regardless of the fix elsewhere.
 /// </summary>
 [Haiku.Testing.TestModule("BView")]
 public class ViewTests
