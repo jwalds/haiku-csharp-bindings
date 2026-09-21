@@ -4,27 +4,27 @@ using System.Runtime.InteropServices;
 namespace Haiku.Interface
 {
 	/*
-	 * Shared base for Button (and future BControl-derived widgets --
-	 * checkbox, radio button, ...) -- the managed mirror of real BeAPI's
-	 * BControl. Wraps the BControl-level surface common to every control:
-	 * Label, Value, IsEnabled. See hs_button.h's "BCONTROL-LEVEL STATE"
-	 * note for why the underlying native functions are still named
-	 * hs_button_* rather than hs_control_* today -- Button is the only
-	 * concrete control this binding has, so there is nothing to
-	 * generalize yet; revisit the native side (not this class) the day a
-	 * second one is added.
+	 * Shared base for Button, TextControl (and any future BControl-
+	 * derived widget) -- the managed mirror of real BeAPI's BControl.
+	 * Wraps the BControl-level surface common to every control: Label,
+	 * Value, IsEnabled. These properties call the native hs_control_*
+	 * functions (see native/include/hs_control.h) -- a shared shim used
+	 * by any concrete control's handle, cast straight to BControl*,
+	 * verified safe by an ABI probe on real hardware for both the
+	 * BButton and BTextControl chains. (Originally these called
+	 * hs_button_* directly, back when Button was the only concrete
+	 * control this binding had; that changed when TextControl arrived.)
 	 *
-	 * Derives from ViewBase, NOT View -- a native control (BButton, and
-	 * any future BControl subclass) draws and handles input entirely on
-	 * its own; there is no OnDraw/OnMouseDown/OnKeyDown/... here the way
-	 * there is on View, because the native shim never wires up those
-	 * callbacks for a control's handle in the first place (see
-	 * hs_button.h's "WHY BUTTON DOESN'T GET ITS OWN DRAW/ATTACHED/
-	 * MOUSE/KEY CALLBACKS" note) -- there is simply nothing that would
-	 * ever call them. Frame/MoveTo/ResizeTo (for positioning) and
-	 * AddChild/RemoveChild interop (a Control can be added to a Window or
-	 * a View, see ViewBase.cs) still work, since those only ever touch
-	 * plain inherited BView state.
+	 * Derives from ViewBase, NOT View -- a native control (BButton,
+	 * BTextControl, and any future BControl subclass) draws and handles
+	 * input entirely on its own; there is no OnDraw/OnMouseDown/
+	 * OnKeyDown/... here the way there is on View, because the native
+	 * shim never wires up those callbacks for a control's handle in the
+	 * first place (see hs_button.h's "WHY BUTTON DOESN'T GET ITS OWN
+	 * DRAW/ATTACHED/MOUSE/KEY CALLBACKS" note). Frame/MoveTo/ResizeTo
+	 * (for positioning) and AddChild/RemoveChild interop (a Control can
+	 * be added to a Window or a View, see ViewBase.cs) still work, since
+	 * those only ever touch plain inherited BView state.
 	 *
 	 * Label/Value/IsEnabled are plain C# read/write properties rather
 	 * than BeAPI's separate SetXxx()/Xxx() method pairs, matching the
@@ -50,12 +50,12 @@ namespace Haiku.Interface
 				// Borrowed pointer into the control's own storage --
 				// copied into a managed string immediately, same
 				// treatment as Window.Title/Message.FindString.
-				return Marshal.PtrToStringAnsi(Native.hs_button_label(_handle));
+				return Marshal.PtrToStringAnsi(Native.hs_control_label(_handle));
 			}
 			set
 			{
 				CheckNotConsumed();
-				Native.hs_button_set_label(_handle, value);
+				Native.hs_control_set_label(_handle, value);
 			}
 		}
 
@@ -70,12 +70,12 @@ namespace Haiku.Interface
 			get
 			{
 				CheckNotConsumed();
-				return Native.hs_button_value(_handle);
+				return Native.hs_control_value(_handle);
 			}
 			set
 			{
 				CheckNotConsumed();
-				Native.hs_button_set_value(_handle, value);
+				Native.hs_control_set_value(_handle, value);
 			}
 		}
 
@@ -84,12 +84,12 @@ namespace Haiku.Interface
 			get
 			{
 				CheckNotConsumed();
-				return Native.hs_button_is_enabled(_handle);
+				return Native.hs_control_is_enabled(_handle);
 			}
 			set
 			{
 				CheckNotConsumed();
-				Native.hs_button_set_enabled(_handle, value);
+				Native.hs_control_set_enabled(_handle, value);
 			}
 		}
 	}

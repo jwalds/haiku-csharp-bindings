@@ -6,28 +6,41 @@ using Haiku.Interface;
 /*
  * A minimal, runnable example of this binding's Interface Kit slice: a
  * BWindow you can actually see and close, containing a BView that actually
- * draws something and responds to mouse and keyboard input, PLUS a real
- * BButton you can click. This is NOT where verification of the binding
- * lives -- see managed/Tests/ (built as Tests.exe) for the actual
- * regression suite, including WindowTests.QuitPostsRequestAndFiresDestroyedCallback,
- * ViewTests' construction/attach/detach/ownership coverage,
- * ViewInputTests' MakeFocus/IsFocus/Invalidate/enum-value coverage, and
- * ButtonTests' Label/Value/IsEnabled/IsDefault/IsFlat/Behavior coverage
- * (plus the AddChildUnderPlainViewSucceeds/AddChildUnderWindowSucceeds
- * regressions for the ViewBase refactor Button required), which all
- * exercise these same paths without needing a human to look at anything.
- * Real hook-firing -- including a real click -- has no automated coverage
- * (see ViewInputTests.cs's/ButtonTests.cs's class remarks for why, same
- * reasoning as Draw() itself in KNOWN_ISSUES.md issue #4). This file
- * exists purely to be a clear, working starting point for your own
- * windowed app, and -- for DemoView specifically -- to answer a real open
- * question: see DemoView's OnDraw remarks below.
+ * draws something and responds to mouse and keyboard input, a real
+ * BButton you can click, and a real BTextControl you can type into. This
+ * is NOT where verification of the binding lives -- see managed/Tests/
+ * (built as Tests.exe) for the actual regression suite, including
+ * WindowTests.QuitPostsRequestAndFiresDestroyedCallback, ViewTests'
+ * construction/attach/detach/ownership coverage, ViewInputTests'
+ * MakeFocus/IsFocus/Invalidate/enum-value coverage, ButtonTests'
+ * Label/Value/IsEnabled/IsDefault/IsFlat/Behavior coverage (plus the
+ * AddChildUnderPlainViewSucceeds/AddChildUnderWindowSucceeds regressions
+ * for the ViewBase refactor Button required), and TextControlTests'
+ * Text/Label/IsEnabled coverage re-verified against this second concrete
+ * control type -- which all exercise these same paths without needing a
+ * human to look at anything. Real hook-firing -- including a real click,
+ * or a real keystroke landing in a text field -- has no automated
+ * coverage (see ViewInputTests.cs's/ButtonTests.cs's/TextControlTests.cs's
+ * class remarks for why, same reasoning as Draw() itself in
+ * KNOWN_ISSUES.md issue #4). This file exists purely to be a clear,
+ * working starting point for your own windowed app, and -- for DemoView
+ * specifically -- to answer a real open question: see DemoView's OnDraw
+ * remarks below.
  *
  * DemoWindow uses WindowFlags.QuitOnWindowClose, so clicking its title bar's
  * close box doesn't just end the window -- BWindow.h's own flag semantics
  * make it signal the owning BApplication to quit too, which is what lets
  * this Main() (blocked in app.Run(), same as the Application Kit sample)
  * return once you close the window.
+ *
+ * DemoTextControl is constructed inside DemoWindow's own constructor,
+ * itself only ever called from DemoApplication.OnReadyToRun() below --
+ * i.e. after Run() has already constructed the owning BApplication. This
+ * is not incidental: see hs_text_control.h's "CRITICAL" note --
+ * constructing a BTextControl before any BApplication exists in the
+ * process hangs forever, so every real app using TextControl needs this
+ * same ordering (construct it after your Application, directly or
+ * indirectly, never before).
  */
 public class DemoView : View
 {
@@ -263,14 +276,48 @@ public class DemoButton : Button
 	}
 }
 
+/*
+ * A real BTextControl, demonstrating this binding's TextControl slice:
+ * Text (via the shared Control base's Label/IsEnabled too, though this
+ * demo leaves those at their constructor defaults), and the two distinct
+ * change events -- OnTextChanged (fires on every edit while focused) and
+ * OnTextCommitted (fires once, on Enter or focus-out-after-an-edit) --
+ * see hs_text_control.h's "TWO DIFFERENT 'CHANGED' EVENTS" note for why
+ * these are separate hooks rather than one. Neither has automated
+ * coverage for actually firing (see TextControlTests.cs's class
+ * remarks), so -- same division of labor as DemoView's mouse/keyboard
+ * hooks and DemoButton's OnClick -- both are verified interactively
+ * here instead: type into the field to see [8] TextChanged lines stream
+ * to the console live, then press Enter or click away to see the single
+ * [8] TextCommitted line with the value that was actually committed.
+ */
+public class DemoTextControl : TextControl
+{
+	public DemoTextControl()
+		: base(new Rect(20, 252, 380, 276), "demo text control", "Type here:", "")
+	{
+	}
+
+	protected override void OnTextChanged()
+	{
+		Console.WriteLine("[8] DemoTextControl text changed, now: \"" + Text + "\"");
+	}
+
+	protected override void OnTextCommitted()
+	{
+		Console.WriteLine("[8] DemoTextControl text committed: \"" + Text + "\"");
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 350), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 390), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
 		AddChild(new DemoButton());
+		AddChild(new DemoTextControl());
 	}
 
 	protected override void OnDestroyed()
@@ -290,7 +337,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, or click the button, close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, or close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()

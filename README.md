@@ -85,9 +85,9 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl)
 
-Five slices so far: `BWindow` (the first), a second, deliberately
+Six slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
@@ -98,11 +98,18 @@ the round trip (colors, `FillRect`/`StrokeRect`/`StrokeLine`, `DrawString`)
 delivered alongside `OnMouseDown`/`OnMouseUp`/`OnKeyDown`/`OnKeyUp`, plus a
 standalone `Modifiers.Current` accessor for everywhere else (`OnMouseMoved`
 included -- see "BView input" below for why that hook doesn't get one of
-its own) -- and now a fifth: `Button`/`Control`, this binding's first
+its own) -- a fifth: `Button`/`Control`, this binding's first
 `BControl`-derived widget, with a direct `OnClick` hook rather than
 BeAPI's own `BMessage`/`BInvoker`/target plumbing (see "Button/Control"
 below for that scope decision, the shared `ViewBase` refactor it required,
-and the ABI-offset fact that refactor rests on). `GetMouse()` polling,
+and the ABI-offset fact that refactor rests on) -- and now a sixth:
+`TextControl`, this binding's second `BControl`-derived widget, adding
+`Text`/`SetText` plus two distinct direct hooks (`OnTextChanged`/
+`OnTextCommitted`) in place of BeAPI's own modification-message/`Invoke()`
+plumbing, and moving `Label`/`Value`/`IsEnabled` out of `Button`'s own
+shim into a new shared `hs_control.h` both widgets now call (see
+"TextControl" below for the design, the native-side split, and two more
+things verified on hardware rather than assumed). `GetMouse()` polling,
 drag & drop, layout/`FrameResized`/`FrameMoved`, and every other
 `BControl`-derived widget (checkbox, radio button, ...) are deferred to a
 follow-up slice -- see "Not yet covered" below. This kit lives in its own
@@ -180,11 +187,16 @@ future kits (Storage, etc.) to also get their own assembly.
   `modifiers()` global function, for reading modifier-key state from
   `OnMouseMoved` or anywhere else outside the four hooks above (a timer,
   `OnDraw`, ...). Safe to call from any thread; see "BView input" below.
-- `Haiku.Interface.Control` -- new abstract base for `BControl`-derived
+- `Haiku.Interface.Control` -- abstract base for `BControl`-derived
   widgets, deriving from `ViewBase` (NOT `View` -- see "Button/Control"
   below for why). `Label`/`Value`/`IsEnabled`, all plain C# properties
   (matching `Window.Title`'s precedent, not `View.MakeFocus`/`IsFocus`'s
   two-separate-members shape -- see the doc comment atop `Control.cs`).
+  These three properties call the native `hs_control_*` functions (see
+  `hs_control.h`), shared by any concrete control's handle -- `Button`
+  and `TextControl` both go through the same three DllImports, not
+  duplicated per widget; see "TextControl" below for why that split
+  exists now and didn't for the Button-only slice before it.
 - `Haiku.Interface.Button` -- wraps a native `BButton` subclass
   (`HSButton`, in `native/`), deriving from `Control`. `OnClick` (a direct
   hook, no `BMessage`/target involved), `MakeDefault`/`IsDefault`,
@@ -197,18 +209,32 @@ future kits (Storage, etc.) to also get their own assembly.
   behaviors, same shape as `MouseTransit`. `PopUpMenu` is included for
   enum parity but isn't fully usable through this binding yet -- see its
   own doc comment.
+- `Haiku.Interface.TextControl` -- wraps a native `BTextControl` subclass
+  (`HSTextControl`, in `native/`), deriving from `Control` (so it gets
+  `Label`/`Value`/`IsEnabled` for free, same as `Button`). `Text` (get/
+  set), `OnTextChanged` (fires on every edit while focused) and
+  `OnTextCommitted` (fires once, on Enter or focus-out-after-an-edit) --
+  both direct hooks, no `BMessage`/target involved. See "TextControl"
+  below before touching `TextControl.cs`, `Control.cs`, or
+  `hs_text_control.cpp` -- in particular, constructing one before a
+  `BApplication` exists in the process hangs forever rather than failing
+  fast, and its constructor silently overrides whatever height its frame
+  argument asks for.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
 identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
 beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
 DRAWING note), `AddChild`'s `before` (insert position) parameter, any
-`BControl`-derived widget other than `Button` (checkbox, radio button,
-slider, ...), and any real `BMessage`/`BInvoker`/target-based invocation
-(`Button`'s `OnClick` is a direct callback instead -- see "Button/Control"
-below) -- deliberately deferred to a follow-up slice rather than folded
-into this one. Also not yet covered: everything else in Interface Kit
-(~50 other classes), `BScreen`, `BDirectWindow`.
+`BControl`-derived widget other than `Button`/`TextControl` (checkbox,
+radio button, slider, ...), `TextControl`'s own `Divider`/`Alignment` and
+the underlying `BTextView` it wraps (see "TextControl" below for that
+scope decision), and any real `BMessage`/`BInvoker`/target-based
+invocation (`Button`'s `OnClick` and `TextControl`'s `OnTextChanged`/
+`OnTextCommitted` are direct callbacks instead -- see "Button/Control"
+and "TextControl" below) -- deliberately deferred to a follow-up slice
+rather than folded into this one. Also not yet covered: everything else
+in Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -558,6 +584,142 @@ Haiku box (`screenshot -s -f png`, run silently to avoid the interactive
 save dialog blocking over SSH) showing the button rendered correctly,
 positioned beneath `DemoView` with the expected native 3D-bevel look.
 
+## TextControl: two change events, a construction-time BApplication requirement, and a height surprise
+
+`TextControl` is this binding's second `BControl`-derived widget. It
+reuses everything the Button/Control slice built (`ViewBase`, `Control`,
+the offset-0 ABI reuse for geometry and `AddChild`/`RemoveChild`), forced
+one refactor that widget's own doc comments had already flagged as
+coming, and turned up two more real, hardware-verified BeAPI facts along
+the way.
+
+**Two distinct "changed" events, still with no BMessage/BInvoker/target
+plumbing exposed.** Real `BTextControl` gives you two different
+notifications, both normally delivered as a `BMessage` to a `BInvoker`
+target: a *modification* message (`SetModificationMessage()`/
+`SetTarget()`), which the Be Book documents as firing "whenever the user
+modifies the text" while the child `BTextView` has focus -- i.e. on every
+keystroke that changes the text -- and `Invoke()` itself (inherited via
+`BControl`/`BInvoker`), documented as firing "when the text changes after
+focus is lost from the BTextView" -- i.e. once, on commit: Enter, or
+focus-out after an edit. Neither is exposed as `BMessage`/`BInvoker`
+plumbing here, matching the scope decision `Button.OnClick` already made.
+`HSTextControl` sends itself a private, internal-only `BMessage` (a
+`what` constant declared nowhere managed code can see) for the
+modification message and intercepts it in an overridden
+`MessageReceived()`, firing `TextControl.OnTextChanged` directly; it
+overrides `Invoke()` exactly like `HSButton::Invoke()` does, firing
+`TextControl.OnTextCommitted` directly instead of posting anywhere. Both
+are direct virtual hooks, same C#-idiomatic shape as `Button.OnClick` and
+`View`'s own hooks.
+
+**`SetTarget(this)` has to be called twice.** `BInvoker::SetTarget()`
+captures a `BMessenger` pointing at the given target on the given (or
+inferred) `BLooper`. Called from `HSTextControl`'s constructor, before
+the control is attached to any window, there is no `BLooper` yet to
+infer -- so `HSTextControl` also overrides `AttachedToWindow()`, chains up
+to `BTextControl::AttachedToWindow()` (which, unlike `HSButton`, is NOT
+overridden away -- it does real layout work that has to run), and calls
+`SetTarget(this)` again afterward, once a valid `Looper` actually exists.
+
+**`hs_control.h`: the refactor `hs_button.h` said would come.** The
+original `hs_button.h` implemented `Label`/`Value`/`IsEnabled` directly
+against `HSButton`, with its own doc comment explicitly saying to revisit
+that "the day a second concrete control arrives." `TextControl` is that
+day: those six functions moved into new `native/include/hs_control.h` /
+`native/src/hs_control.cpp` files, casting the opaque handle straight to
+`BControl*` regardless of which concrete class is actually behind it --
+safe for the same offset-0-first-non-virtual-base reasoning
+`hs_view_add_child()`'s own comment documents for `BView*`, now verified
+for the `BControl` link in the chain too (see the next paragraph).
+`Control.cs`'s `Label`/`Value`/`IsEnabled` properties now call
+`Native.hs_control_*` instead of `Native.hs_button_*`, with zero
+behavior change for `Button` -- re-verified by `ButtonTests.cs`'s
+existing `LabelRoundTrips`/`ValueRoundTrips`/`IsEnabledRoundTrips` still
+passing unchanged, plus `TextControlTests.cs`'s own `LabelRoundTrips`/
+`IsEnabledRoundTrips` proving the same shared functions work correctly
+against a completely different concrete control type.
+
+**Verified on hardware: `BControl` sits at offset 0 for `BTextControl`
+too, not just for `BButton`.** `BButton`'s chain (`BControl : public
+BView, public BInvoker`) needed its own ABI probe rather than assuming
+`BView`'s already-verified offset-0 status extended to `BControl`, since
+`BControl` uses multiple inheritance (see "Button/Control" above).
+`BTextControl` is simpler -- single inheritance all the way down
+(`class BTextControl : public BControl`) -- but this project verifies
+each new structural claim rather than assuming a simpler case must also
+be fine. A small native probe, compiled and run on the actual Haiku box
+(inside a constructed `BApplication` -- see the next finding), confirmed
+it:
+
+```
+HSTextControlProbe* = 0x3e61539380
+as BView*           = 0x3e61539380 (offset 0)
+as BControl*        = 0x3e61539380 (offset 0)
+as BTextControl*    = 0x3e61539380 (offset 0)
+reinterpret_cast<BView*>(void*) == static_cast<BView*>(tc): MATCH
+reinterpret_cast<BControl*>(void*) == static_cast<BControl*>(tc): MATCH
+```
+
+**Verified on hardware: constructing a `BTextControl` with no
+`BApplication` yet in the process hangs forever.** Unlike `BView`/
+`BButton`, both of which construct fine with zero `BApplication` anywhere
+in the process, a first attempt to run the ABI probe above with no
+`BApplication` at all (mirroring the `HSButtonProbe` probe, which needed
+none) never returned -- the process had to be killed after a 120-second
+timeout. Wrapping construction in a plain `BApplication app("...");` (just
+constructed, `Run()` not required) fixed it immediately; likely cause is
+a blocking app_server round-trip for font metrics needed to lay out the
+initial text/label, which never returns without a live app_server
+connection (established at `BApplication` construction, not `Run()`).
+Practical consequence: `hs_text_control_create()` must never be called
+before a `BApplication` exists in the process -- it hangs, it does not
+fail fast -- so every single `TextControlTests.cs` test wraps its entire
+body in `using (new Application(AppSignature))`, including the pure
+construction/geometry ones, unlike `ViewTests`'/`ButtonTests`'
+construction-only tests, which deliberately use no `Application` at all.
+`Sample.exe`'s `DemoTextControl` is likewise only ever constructed inside
+`DemoWindow`'s own constructor, itself only ever called from
+`OnReadyToRun()` -- after `Run()` has already constructed the owning
+`BApplication`.
+
+**Verified on hardware: construction silently overrides the requested
+height, never the width.** A separate probe constructed three
+`BTextControl`s with requested frame heights of 10, 30, and 100 --
+nothing else different -- and all three came back with the exact same
+actual height (24px, on the font/hardware this was checked on); the
+requested width was honored exactly in every case. A plain `ResizeTo()`
+called afterward was NOT clamped the same way (`(250, 30)` then
+`(250, 5)` were both honored exactly), so this is construction-time-only
+behavior, not a standing clamp. `hs_text_control.h`'s own "CONSTRUCTION
+SILENTLY OVERRIDES THE REQUESTED HEIGHT" note has the full probe output.
+Practical consequence: `TextControlTests.ConstructionAndGeometryRoundTrip`
+checks `Left`/`Top`/width against what the constructor was given, but
+does not assert an exact height fresh out of the constructor -- it treats
+whatever height comes back as the known-good baseline for the `MoveTo`
+check that follows, then separately asserts `ResizeTo()` DOES honor an
+exact height, since that path is not overridden.
+
+**Verification.** `TextControlTests.cs` (module `BTextControl`) covers
+everything that doesn't need a real keystroke or focus change:
+construction/geometry (with the height caveat above), `Text` round-
+tripping (both the initial-text constructor and `SetText` afterward),
+`Label`/`IsEnabled` (re-verified against this second concrete control
+type), and the same `AddChild`/`RemoveChild`/`Dispose()`-while-attached/
+cascade-on-destroy ownership rules `ButtonTests.cs` already covers for
+`Button`. Real event-firing has no automated coverage, same reasoning as
+every other input hook in this binding (see `TextControlTests.cs`'s own
+class remarks) -- `Sample.exe`'s `DemoTextControl` (a real "Type here:"
+field beneath `DemoButton`) was confirmed rendering correctly via a real
+screenshot on the Haiku box, same division of labor as `DemoButton`'s own
+verification; actually typing into it and pressing Enter to exercise
+`OnTextChanged`/`OnTextCommitted` (the `[8] DemoTextControl text
+changed`/`text committed` lines described below) needs a keyboard at the
+Haiku box itself and has not been exercised as part of this automated
+session -- same "verified by running it and looking" category as every
+other hook in this binding, just not yet actually run by a human this
+time.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -594,15 +756,16 @@ something (a filled/stroked rect and a line of text, via real `BeAPI`
 calls), takes keyboard focus and tracks mouse/keyboard input live (see
 "BView input" above), a real `DemoButton` ("Click Me") beneath it that
 updates its own label with a running click count and disables itself
-after three clicks (see "Button/Control" above), and waits for you to
-close it (its title bar's close box), at which point
-`WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
-too. Expected output:
+after three clicks (see "Button/Control" above), a real `DemoTextControl`
+("Type here:") beneath that which logs every edit and every commit (see
+"TextControl" above), and waits for you to close it (its title bar's
+close box), at which point `WindowFlags.QuitOnWindowClose` signals the
+owning `BApplication` to quit too. Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it, type, or click the button, close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, or close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -629,6 +792,15 @@ third click it prints an additional `[7] DemoButton disabled itself
 disabled rendering, not anything this binding draws itself). That's the
 actual verification for `OnClick`/`IsEnabled`, since (per "Button/Control"
 above) there's no automated or synthetic way to fire a real click either.
+
+Typing into the "Type here:" field prints `[8] DemoTextControl text
+changed, now: "..."` on every keystroke that changes the text, and
+pressing Enter (or clicking away to move focus elsewhere) prints a single
+`[8] DemoTextControl text committed: "..."` line with whatever was
+actually committed. That's the actual verification for
+`OnTextChanged`/`OnTextCommitted`, since (per "TextControl" above)
+there's no automated or synthetic way to fire a real keystroke or focus
+change either.
 
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
@@ -698,13 +870,18 @@ left on screen BEFORE that test runs, with its result appended once known:
   LabelRoundTrips ... PASS
   ...
 
+== BTextControl ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  TextRoundTripsFromConstructor ... PASS
+  ...
+
 == Interface Kit ==
   QuitPostsRequestAndFiresDestroyedCallback ... PASS
 
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-64 passed, 0 failed, 0 errored
+75 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -725,7 +902,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Six modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Seven modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -760,6 +937,20 @@ today:
   include a test that actually fires `OnClick` -- read
   `managed/Tests/ButtonTests.cs`'s own class remarks and "Button/Control"
   above before trying to add one.
+- `BTextControl` (class `TextControlTests`) -- construction/geometry
+  (with a real caveat: BTextControl's constructor overrides whatever
+  height the frame argument asks for, see "TextControl" above and the
+  test's own remarks), `Text` round-tripping (both the initial-text
+  constructor and `SetText`), `Label`/`IsEnabled` re-verified against
+  this second concrete control type, and the same ownership rules
+  `BButton` covers for `Button`. UNLIKE every other module's construction
+  tests, every single test here opens a `using (new
+  Application(AppSignature))` first -- load-bearing, not stylistic, since
+  constructing a `BTextControl` with no `BApplication` yet in the process
+  hangs forever (see "TextControl" above). Deliberately does NOT include
+  a test that actually fires `OnTextChanged`/`OnTextCommitted` -- read
+  `managed/Tests/TextControlTests.cs`'s own class remarks and
+  "TextControl" above before trying to add one.
 - `Interface Kit` (class `WindowTests`) -- `BWindow`'s `Quit()`/
   `OnDestroyed()` lifecycle (see `managed/Tests/WindowTests.cs`), including
   the poll-with-timeout pattern needed because there's no blocking

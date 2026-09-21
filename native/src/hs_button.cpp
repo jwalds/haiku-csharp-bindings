@@ -116,42 +116,6 @@ void hs_button_set_destroyed_callback(hs_handle button,
 }
 
 
-void hs_button_set_label(hs_handle button, const char* label)
-{
-	static_cast<HSButton*>(button)->SetLabel(label);
-}
-
-
-const char* hs_button_label(hs_handle button)
-{
-	return static_cast<HSButton*>(button)->Label();
-}
-
-
-void hs_button_set_value(hs_handle button, int32_t value)
-{
-	static_cast<HSButton*>(button)->SetValue(value);
-}
-
-
-int32_t hs_button_value(hs_handle button)
-{
-	return static_cast<HSButton*>(button)->Value();
-}
-
-
-void hs_button_set_enabled(hs_handle button, bool enabled)
-{
-	static_cast<HSButton*>(button)->SetEnabled(enabled);
-}
-
-
-bool hs_button_is_enabled(hs_handle button)
-{
-	return static_cast<HSButton*>(button)->IsEnabled();
-}
-
-
 void hs_button_make_default(hs_handle button, bool is_default)
 {
 	static_cast<HSButton*>(button)->MakeDefault(is_default);

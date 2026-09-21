@@ -63,6 +63,18 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ButtonDestroyedCallback(IntPtr userData);
 
+	/* TextControl delegate shapes matching hs_text_control.h's callback
+	 * typedefs exactly. No BMessage/target involved in either callback --
+	 * see hs_text_control.h's "TWO DIFFERENT 'CHANGED' EVENTS" note. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void TextControlTextChangedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void TextControlTextCommittedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void TextControlDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -279,11 +291,43 @@ namespace Haiku.Interface
 		[DllImport(Lib)]
 		internal static extern uint hs_modifiers();
 
-		/* Button/Control -- see hs_button.h for the full design
-		 * rationale. hs_view_get_frame/move_to/resize_to above are
-		 * reused directly for a button's own handle (see hs_view.cpp's
-		 * comments on those three); there is no separate
-		 * hs_button_get_frame/move_to/resize_to. */
+		/* Control -- shared BControl-level state (Label/Value/IsEnabled),
+		 * see hs_control.h for the full design rationale. Used against
+		 * any concrete control's handle (Button, TextControl, ...), cast
+		 * straight to BControl* on the native side -- verified safe by
+		 * an ABI probe on real hardware. hs_view_get_frame/move_to/
+		 * resize_to above are reused directly the same way for
+		 * geometry; there is no separate hs_control_get_frame/move_to/
+		 * resize_to. */
+		[DllImport(Lib)]
+		internal static extern void hs_control_set_label(IntPtr control, string label);
+
+		/* Returns a pointer into BControl's own internal storage, same
+		 * borrowed-pointer situation as hs_window_title -- Control.cs's
+		 * Label getter copies it into a managed string immediately via
+		 * Marshal.PtrToStringAnsi, same treatment as Window.Title. This
+		 * is why the return type here is IntPtr, not string -- see
+		 * hs_window_title's own comment just above for why. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_control_label(IntPtr control);
+
+		[DllImport(Lib)]
+		internal static extern void hs_control_set_value(IntPtr control, int value);
+
+		[DllImport(Lib)]
+		internal static extern int hs_control_value(IntPtr control);
+
+		[DllImport(Lib)]
+		internal static extern void hs_control_set_enabled(IntPtr control,
+			[MarshalAs(UnmanagedType.I1)] bool enabled);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_control_is_enabled(IntPtr control);
+
+		/* Button -- see hs_button.h for the full design rationale.
+		 * Label/Value/IsEnabled are NOT declared here -- see the shared
+		 * hs_control_* block just above. */
 		[DllImport(Lib)]
 		internal static extern IntPtr hs_button_create(HsRect frame, string name,
 			string label, uint resizingMode, uint flags);
@@ -298,32 +342,6 @@ namespace Haiku.Interface
 		[DllImport(Lib)]
 		internal static extern void hs_button_set_destroyed_callback(IntPtr button,
 			ButtonDestroyedCallback callback, IntPtr userData);
-
-		[DllImport(Lib)]
-		internal static extern void hs_button_set_label(IntPtr button, string label);
-
-		/* Returns a pointer into BControl's own internal storage, same
-		 * borrowed-pointer situation as hs_window_title -- Control.cs's
-		 * Label getter copies it into a managed string immediately via
-		 * Marshal.PtrToStringAnsi, same treatment as Window.Title. This
-		 * is why the return type here is IntPtr, not string -- see
-		 * hs_window_title's own comment just above for why. */
-		[DllImport(Lib)]
-		internal static extern IntPtr hs_button_label(IntPtr button);
-
-		[DllImport(Lib)]
-		internal static extern void hs_button_set_value(IntPtr button, int value);
-
-		[DllImport(Lib)]
-		internal static extern int hs_button_value(IntPtr button);
-
-		[DllImport(Lib)]
-		internal static extern void hs_button_set_enabled(IntPtr button,
-			[MarshalAs(UnmanagedType.I1)] bool enabled);
-
-		[DllImport(Lib)]
-		[return: MarshalAs(UnmanagedType.I1)]
-		internal static extern bool hs_button_is_enabled(IntPtr button);
 
 		[DllImport(Lib)]
 		internal static extern void hs_button_make_default(IntPtr button,
@@ -346,5 +364,45 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern uint hs_button_behavior(IntPtr button);
+
+		/* TextControl -- see hs_text_control.h for the full design
+		 * rationale, including the "MUST NOT be called before a
+		 * BApplication has been constructed" note on hs_text_control_create.
+		 * Label/Value/IsEnabled are NOT declared here either -- same
+		 * shared hs_control_* block above, reused for a text control's
+		 * handle exactly as it is for a button's. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_text_control_create(HsRect frame,
+			string name, string label, string text, uint resizingMode,
+			uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_text_control_destroy(IntPtr textControl);
+
+		[DllImport(Lib)]
+		internal static extern void hs_text_control_set_text_changed_callback(
+			IntPtr textControl, TextControlTextChangedCallback callback,
+			IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_text_control_set_text_committed_callback(
+			IntPtr textControl, TextControlTextCommittedCallback callback,
+			IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_text_control_set_destroyed_callback(
+			IntPtr textControl, TextControlDestroyedCallback callback,
+			IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_text_control_set_text(IntPtr textControl,
+			string text);
+
+		/* Returns a pointer into BTextControl's own internal storage,
+		 * same borrowed-pointer situation as hs_control_label above --
+		 * TextControl.cs's Text getter copies it into a managed string
+		 * immediately via Marshal.PtrToStringAnsi. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_text_control_text(IntPtr textControl);
 	}
 }

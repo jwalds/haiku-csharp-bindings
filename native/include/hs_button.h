@@ -58,15 +58,17 @@
  * call any of those, by convention, the same way this binding's
  * ownership rules are convention-enforced elsewhere rather than typed.
  *
- * BCONTROL-LEVEL STATE, IMPLEMENTED DIRECTLY ON HSBUTTON
+ * BCONTROL-LEVEL STATE MOVED TO hs_control.h
  * --------------------------------------------------------------------------
- * Label/Value/Enabled are BControl-level API, but HSButton is the only
- * concrete HSView-family control this binding has today, so they're
- * implemented directly here (hs_button_label(), not hs_control_label())
- * rather than inventing a shared HSControl base ahead of a second
- * control actually needing one -- same YAGNI call this binding already
- * makes elsewhere. Revisit this the day a second BControl-derived
- * widget (checkbox, radio button, ...) is added.
+ * Label/Value/Enabled used to be implemented directly here, back when
+ * HSButton was the only concrete HSView-family control this binding
+ * had (this section used to say "revisit this the day a second
+ * BControl-derived widget is added" -- TextControl is that day). They
+ * now live in hs_control.h/hs_control.cpp instead, shared by any
+ * concrete control whose handle can be cast straight to BControl* --
+ * see that file's own header comment for the ABI reasoning. Call
+ * hs_control_set_label()/hs_control_label()/etc. directly against a
+ * button handle; nothing button-specific is lost by doing so.
  */
 #ifndef HS_BUTTON_H
 #define HS_BUTTON_H
@@ -98,21 +100,13 @@ void hs_button_set_click_callback(hs_handle button,
 void hs_button_set_destroyed_callback(hs_handle button,
 	hs_button_destroyed_callback callback, void* user_data);
 
-/* BControl-level state -- see the BCONTROL-LEVEL STATE note above. */
-void hs_button_set_label(hs_handle button, const char* label);
-
-/* Returns a pointer into BControl's own internal storage, same borrowed-
- * pointer situation as hs_window_title() -- copy it into a managed
- * string immediately, do not hold onto it or free it. */
-const char* hs_button_label(hs_handle button);
-
-void hs_button_set_value(hs_handle button, int32_t value);
-int32_t hs_button_value(hs_handle button);
-
-void hs_button_set_enabled(hs_handle button, bool enabled);
-bool hs_button_is_enabled(hs_handle button);
-
-/* BButton-specific state. */
+/* BControl-level state (Label/Value/IsEnabled) is NOT declared here --
+ * see hs_control.h, shared with every other concrete control this
+ * binding wraps. Call hs_control_set_label()/hs_control_label()/etc.
+ * directly against a button handle; safe, see hs_control.h's own
+ * rationale for why.
+ *
+ * BButton-specific state. */
 void hs_button_make_default(hs_handle button, bool is_default);
 bool hs_button_is_default(hs_handle button);
 
