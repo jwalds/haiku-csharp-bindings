@@ -63,6 +63,16 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ButtonDestroyedCallback(IntPtr userData);
 
+	/* ColorControl delegate shapes matching hs_color_control.h's
+	 * callback typedefs exactly. Same "no BMessage/target involved"
+	 * shape as ButtonClickCallback above -- see hs_color_control.h's
+	 * own "NO BMessage/BInvoker/TARGET PLUMBING" note. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ColorControlValueChangedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ColorControlDestroyedCallback(IntPtr userData);
+
 	/* TextControl delegate shapes matching hs_text_control.h's callback
 	 * typedefs exactly. No BMessage/target involved in either callback --
 	 * see hs_text_control.h's "TWO DIFFERENT 'CHANGED' EVENTS" note. */
@@ -597,5 +607,42 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern float hs_slider_bar_thickness(IntPtr slider);
+
+		/* Raw P/Invoke surface for hs_color_control.h. ColorControl.cs
+		 * wraps every one of these in a safe, idiomatic method/property. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_color_control_create(HsPoint start, uint layout,
+			float cellSize, string name, [MarshalAs(UnmanagedType.I1)] bool useOffscreen);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_destroy(IntPtr colorControl);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_set_value_changed_callback(IntPtr colorControl,
+			ColorControlValueChangedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_set_destroyed_callback(IntPtr colorControl,
+			ColorControlDestroyedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_set_value_color(IntPtr colorControl,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_value_as_color(IntPtr colorControl,
+			out byte outRed, out byte outGreen, out byte outBlue, out byte outAlpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_set_cell_size(IntPtr colorControl, float size);
+
+		[DllImport(Lib)]
+		internal static extern float hs_color_control_cell_size(IntPtr colorControl);
+
+		[DllImport(Lib)]
+		internal static extern void hs_color_control_set_layout(IntPtr colorControl, uint layout);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_color_control_layout(IntPtr colorControl);
 	}
 }

@@ -85,9 +85,9 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton/Slider)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton/Slider/ColorControl)
 
-Nine slices so far: `BWindow` (the first), a second, deliberately
+Ten slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
@@ -129,11 +129,22 @@ facts: `BSlider` needs a live `BApplication` to construct, matching
 three frame-based constructor overloads collapse to a single native
 `hs_slider_create()` taking an explicit orientation argument, since the
 no-orientation overload was confirmed equivalent to explicitly passing
-`B_HORIZONTAL`. `GetMouse()` polling, drag & drop, layout/
-`FrameResized`/`FrameMoved`, `Slider`'s own hash marks/bar-fill colors/
-custom icon/snooze amount, and every other `BControl`-derived widget
-(`BColorControl`, `BPictureButton`, `BStatusBar`, ...) are deferred to a
-follow-up slice -- see "Not yet covered" below. This kit lives in its own
+`B_HORIZONTAL` (a later completeness pass closed most of `Slider`'s
+remaining gaps -- hash marks, bar/fill colors, snooze amount, bar
+thickness -- see "Slider" below) -- and a tenth: `ColorControl`, this
+binding's sixth `BControl`-derived widget, reusing `Button`'s own
+`Invoke()`-override shape (a single value-changed hook, no separate
+drag/commit split) but breaking from every prior widget's own
+`Rect`-frame construction -- real `BColorControl` takes a `Point` start
+position instead and computes its own size from a `ColorControlLayout`
+and cell size, and its `Label` is applied by `ColorControl.cs` itself
+after construction rather than by the native constructor, which has no
+label parameter at all (see "ColorControl" below for both hardware-
+verified facts, plus a sixth confirmed `BApplication`-at-construction
+requirement). `GetMouse()` polling, drag & drop, layout/`FrameResized`/
+`FrameMoved`, and every other `BControl`-derived widget (`BPictureButton`,
+`BOptionPopUp`, `BChannelSlider`, ...) are deferred to a follow-up slice
+-- see "Not yet covered" below. This kit lives in its own
 assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
 `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
@@ -269,6 +280,26 @@ future kits (Storage, etc.) to also get their own assembly.
   (`B_HASH_MARKS_NONE`/`TOP`/`BOTTOM`/`BOTH`, plus `LEFT`/`RIGHT` as
   hardware-verified aliases of `TOP`/`BOTTOM` -- see "Slider" below),
   verified against the actual installed `Slider.h`.
+- `Haiku.Interface.ColorControl` -- wraps a native `BColorControl`
+  subclass (`HSColorControl`, in `native/`), deriving from `Control` (so
+  it gets `Label`/`Value`/`IsEnabled` for free, same as every other
+  control) -- but, unlike every other control in this binding, its
+  constructor takes a `Point` start position rather than a `Rect` frame
+  (real `BColorControl` computes its own size from layout+cellSize), and
+  its `Label` is applied by `ColorControl.cs` itself after construction,
+  not by the native constructor (which has none). `Color` (an `RgbColor`,
+  wrapping real `ValueAsColor()`/`SetValue(rgb_color)` directly rather
+  than reimplementing their packing formula), `CellSize`,
+  `Layout` (a `ColorControlLayout`), and `OnColorChanged` (fires once per
+  color pick -- no separate drag/commit split the way `Slider` has). See
+  "ColorControl" below before touching `ColorControl.cs`, `Control.cs`,
+  or `hs_color_control.cpp` -- in particular, constructing one before a
+  `BApplication` exists in the process hangs forever, same as
+  `TextControl`/`RadioButton`/`Slider`.
+- `Haiku.Interface.ColorControlLayout` -- Haiku's `color_control_layout`
+  enum (`B_CELLS_4x64`=4/`B_CELLS_8x32`=8/`B_CELLS_16x16`=16/
+  `B_CELLS_32x8`=32/`B_CELLS_64x4`=64), plain non-sequential values,
+  verified against the actual installed `ColorControl.h`.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
 identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
@@ -276,7 +307,7 @@ beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
 DRAWING note), `AddChild`'s `before` (insert position) parameter, any
 `BControl`-derived widget other than `Button`/`TextControl`/`CheckBox`/
-`RadioButton`/`Slider` (`BColorControl`, `BPictureButton`, `BOptionPopUp`,
+`RadioButton`/`Slider`/`ColorControl` (`BPictureButton`, `BOptionPopUp`,
 `BChannelSlider`, ...) -- `BStatusBar`, despite being an easy widget to
 lump in with these by name, actually derives from `BView` directly, not
 `BControl` (confirmed by reading the actual installed header, not
@@ -290,13 +321,20 @@ project doesn't have), `UpdateText()`/`UpdateTextChanged()` (a virtual
 override needing native-owned per-call string lifetime management),
 `ValueForPoint()`, and the raw drawing internals (`DrawSlider`/`DrawBar`/
 `DrawHashMarks`/`DrawThumb`/`DrawFocusMark`/`DrawText`/etc. -- see "Slider"
-below for that scope decision), and any real `BMessage`/`BInvoker`/target-based invocation
+below for that scope decision), `ColorControl`'s own `SetIcon()` (same
+`BBitmap`-binding gap as `Slider`'s), the `BMessage`-based constructor/
+`Archive()`/`Instantiate()` (`BArchivable` persistence is out of scope
+everywhere in this binding), `SetLayout(BLayout*)` (the newer layout API,
+out of scope everywhere else too), and its own raw drawing internals
+(`_DrawColorArea`/`_DrawSelectors`/`_DrawColorRamp`/etc. -- see
+"ColorControl" below), and any real `BMessage`/`BInvoker`/target-based invocation
 (`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/`OnTextCommitted`,
-`CheckBox`'s/`RadioButton`'s own `OnClick`, and `Slider`'s
-`OnValueChanged`/`OnValueCommitted` are all direct callbacks instead --
-see "Button/Control", "TextControl", "CheckBox/RadioButton", and
-"Slider" below) -- deliberately deferred to a follow-up slice rather
-than folded into this one. Also not yet covered: everything else in
+`CheckBox`'s/`RadioButton`'s own `OnClick`, `Slider`'s
+`OnValueChanged`/`OnValueCommitted`, and `ColorControl`'s
+`OnColorChanged` are all direct callbacks instead -- see "Button/Control",
+"TextControl", "CheckBox/RadioButton", "Slider", and "ColorControl"
+below) -- deliberately deferred to a follow-up slice rather than folded
+into this one. Also not yet covered: everything else in
 Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
@@ -1036,6 +1074,99 @@ bar) was confirmed rendering correctly -- track, thumb, hash marks, and
 both limit labels fully visible with no clipping -- via a real screenshot
 on the Haiku box.
 
+## ColorControl: a Point constructor instead of a Rect, Label applied after the fact, and a sixth verified BApplication requirement
+
+`ColorControl` is this binding's sixth `BControl`-derived widget, and the
+first to genuinely break from every prior widget's construction shape.
+Real `BColorControl`'s constructor takes a `BPoint start` (top-left
+corner only) plus a `color_control_layout` and a cell size -- there is no
+frame parameter at all, because real BeAPI computes the control's own
+width/height internally from those two values. `hs_color_control_create()`
+therefore takes an `hs_point`, not an `hs_rect`, and `ColorControl.cs`'s
+constructor takes a `Point`, not a `Rect` -- the real, BeAPI-computed
+geometry is available afterward through the inherited `Frame` property,
+same as every other control, just never something this binding chooses.
+
+**`Label` is a managed-side convenience, not a native constructor
+parameter -- hardware-verified, not assumed.** Every other control this
+binding wraps (`Button`, `TextControl`, `CheckBox`, `RadioButton`,
+`Slider`) takes a `label` string directly in its native constructor. Real
+`BColorControl`'s constructor has none. A probe confirmed `Label()` reads
+back `NULL` immediately after construction with a non-`NULL` `name` --
+BeAPI does not silently reuse `name` as the label the way it might have.
+`ColorControl.cs`'s constructor accepts a `label` parameter anyway, for
+shape parity with every other control's constructor, and applies it
+itself afterward via the inherited `Control.Label` setter -- a plain
+managed-side convenience, not something the native shim does.
+
+**A sixth widget, a sixth hardware-verified `BApplication` requirement.**
+Constructing a `BColorControl` with no live `BApplication` anywhere in
+the process hangs indefinitely -- confirmed with the same isolated,
+flush-per-step probe technique used for every other widget in this
+binding, matching `TextControl`/`RadioButton`/`Slider`, not `CheckBox`.
+
+**`Color` calls the real `ValueAsColor()`/`SetValue(rgb_color)`, rather
+than reimplementing their packing formula in C#.** Real `BColorControl`
+packs its color into `BControl`'s own inherited `int32` `Value` via an
+inline, non-virtual `SetValue(rgb_color)` that computes
+`(red<<24)+(green<<16)+(blue<<8)` (alpha is never encoded), and a real
+`ValueAsColor()` that unpacks the same way, always returning alpha=255
+regardless of what alpha was ever given to `SetValue(rgb_color)` -- a
+hardware probe confirmed this exactly, including the expected `int32`
+sign wraparound once red >= 128 (e.g. `SetValue(rgb_color{200,150,100,255})`
+reads back as `Value == -929668096`, which round-trips back through
+`ValueAsColor()` correctly regardless). `hs_color_control_set_value_color()`/
+`hs_color_control_value_as_color()` call the real `BColorControl` methods
+directly instead of reimplementing that arithmetic a second time in a
+different language -- a safety/simplicity choice, not a behavior
+difference from what the inherited `Control.Value` already gives you.
+Colors cross the P/Invoke boundary as four raw bytes, the same convention
+`hs_view.h`/`hs_slider.h` already established, not the `hs_rgb_color`
+struct reserved for `BMessage`'s `AddColor`/`FindColor`.
+
+**One value-changed hook, not two -- matching `Button`'s shape, not
+`Slider`'s.** Real `BColorControl` invokes once per color pick (a single
+click on the palette or a ramp is one atomic value change -- there is no
+drag-then-release the way a slider thumb has), so `HSColorControl`
+overrides `Invoke()` the same way `HSButton` does, firing a single direct
+`OnColorChanged` callback with no `BMessage`/target involved -- see
+`hs_color_control.h`'s "NO BMessage/BInvoker/TARGET PLUMBING" note.
+
+**`CellSize`/`Layout` are independent, plain round-trips -- no rounding
+or clamping surprise the way `Slider`'s `BarThickness` has.** Both
+hardware-confirmed: `SetCellSize`/`CellSize` round-trip an exact float,
+`SetLayout`/`Layout` round-trip the exact `color_control_layout` value
+given, and changing one never changes the other.
+
+**Scope.** `Color`/`CellSize`/`Layout`/`OnColorChanged`, plus the shared
+`Label`/the raw `int32` `Value`/`IsEnabled` via `Control` -- `SetIcon()`
+(needs a `BBitmap` binding this project doesn't have, same reason
+`Slider` defers its own), the `BMessage`-based constructor/`Archive()`/
+`Instantiate()` (`BArchivable` persistence is out of scope everywhere in
+this binding), `SetLayout(BLayout*)` (the newer layout API, out of scope
+everywhere else too), and the raw drawing internals
+(`_DrawColorArea`/`_DrawSelectors`/`_DrawColorRamp`/etc.) are real
+`BColorControl` API this binding does not expose, a deliberate scope
+decision (captured in `hs_color_control.h`'s own header comment), not an
+oversight.
+
+**Verification.** `ColorControlTests.cs` (module `BColorControl`, 13
+tests) covers construction/geometry (the exact, hardware-confirmed
+`Frame()` a given start/layout/cellSize produces -- there is no frame
+parameter to compare against, unlike every other control's test file),
+`Label`/`IsEnabled` (re-verified against this sixth concrete control
+type, including the managed-side-applied-`Label` case and a `null`-label
+case), `Color` round-tripping (including the always-255 alpha fact),
+`CellSize`/`Layout` round-tripping, and the same `AddChild`/`RemoveChild`/
+`Dispose()`-while-attached/cascade-on-destroy ownership rules every other
+widget in this binding covers. It deliberately does not attempt to fire
+`OnColorChanged` automatically, same reasoning as every other input hook
+in this binding. Real event-firing is verified visually instead:
+`Sample.exe`'s `DemoColorControl` ("Color:", a 32x8 grid with a 6px cell
+size) was confirmed rendering correctly -- the RGB ramps, selectors, and
+numeric Red/Green/Blue fields all fully visible with no clipping -- via a
+real screenshot on the Haiku box.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -1080,21 +1211,23 @@ effect visible on screen, and a group of three real `DemoRadioButton`s
 ("Option A"/"Option B"/"Option C") demonstrating BeAPI's own automatic
 mutual-exclusivity grouping live -- clicking one visibly unchecks the
 others with no grouping code anywhere in this binding (see
-"CheckBox/RadioButton" above) -- and a real `DemoSlider` ("Volume:", with
+"CheckBox/RadioButton" above) -- a real `DemoSlider` ("Volume:", with
 "Quiet"/"Loud" limit labels) beneath that, logging every drag tick and
-every committed value (see "Slider" above) -- and waits for you to close
+every committed value (see "Slider" above) -- and, beneath that, a real
+`DemoColorControl` ("Color:", a 32x8 grid with a 6px cell size) logging
+every color pick (see "ColorControl" above) -- and waits for you to close
 it (its title bar's close box), at which point
 `WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
 too.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", and the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels, and the DemoColorControl "Color:" grid with its RGB ramps and numeric fields](screenshots/sample-demo.png)
 
 Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, or close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, or close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -1154,6 +1287,12 @@ value was actually committed -- the actual verification for
 `OnValueChanged`/`OnValueCommitted`, since (per "Slider" above) there's
 no automated or synthetic way to fire a real drag/mouse-release either.
 
+Clicking a color in the "Color:" grid -- the palette or either RGB ramp --
+prints a single `[12] DemoColorControl color changed, now: (R, G, B, A)`
+line with whatever color was actually picked -- the actual verification
+for `OnColorChanged`, since (per "ColorControl" above) there's no
+automated or synthetic way to fire a real palette/ramp click either.
+
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
 close it via its own close box, but not necessarily if the application is
@@ -1202,21 +1341,6 @@ gets its own header, and every test's name is written out, flushed, and
 left on screen BEFORE that test runs, with its result appended once known:
 
 ```
-== BMessage ==
-  Int8RoundTrips ... PASS
-  Int16RoundTrips ... PASS
-  ...
-
-== BView Input ==
-  IsFocusDefaultsFalseBeforeMakeFocusIsCalled ... PASS
-  FocusRoundTripsWhileAttachedToUnshownWindow ... PASS
-  ...
-
-== BView ==
-  ConstructionAndGeometryRoundTrip ... PASS
-  AddChildFiresAttachedToWindowSynchronously ... PASS
-  ...
-
 == BButton ==
   ConstructionAndGeometryRoundTrip ... PASS
   LabelRoundTrips ... PASS
@@ -1225,6 +1349,16 @@ left on screen BEFORE that test runs, with its result appended once known:
 == BCheckBox ==
   ConstructionAndGeometryRoundTrip ... PASS
   LabelRoundTrips ... PASS
+  ...
+
+== BColorControl ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  LabelRoundTrips ... PASS
+  ...
+
+== BMessage ==
+  Int8RoundTrips ... PASS
+  Int16RoundTrips ... PASS
   ...
 
 == BRadioButton ==
@@ -1242,13 +1376,23 @@ left on screen BEFORE that test runs, with its result appended once known:
   TextRoundTripsFromConstructor ... PASS
   ...
 
+== BView Input ==
+  IsFocusDefaultsFalseBeforeMakeFocusIsCalled ... PASS
+  FocusRoundTripsWhileAttachedToUnshownWindow ... PASS
+  ...
+
+== BView ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  AddChildFiresAttachedToWindowSynchronously ... PASS
+  ...
+
 == Interface Kit ==
   QuitPostsRequestAndFiresDestroyedCallback ... PASS
 
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-121 passed, 0 failed, 0 errored
+134 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -1269,7 +1413,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Ten modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Eleven modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -1313,6 +1457,23 @@ today:
   suite's own module run order, see "CheckBox/RadioButton" above and
   this file's own class remarks for the real hang that motivated it.
   Deliberately does NOT include a test that actually fires `OnClick`.
+- `BColorControl` (class `ColorControlTests`, 13 tests) --
+  construction/geometry (the exact, hardware-confirmed `Frame()` a given
+  start/layout/cellSize produces -- see "ColorControl" above for why
+  there's no frame parameter to compare against here, unlike every other
+  module), `Label`/`IsEnabled` round-tripping (re-verified against this
+  sixth concrete control type, including the managed-side-applied-`Label`
+  case and a `null`-label case, since real `BColorControl`'s own
+  constructor has no label parameter at all), `Color` round-tripping
+  (including the always-255 alpha fact), `CellSize`/`Layout`
+  round-tripping, and the same ownership rules every other module covers.
+  Like `TextControlTests`/`RadioButtonTests`/`SliderTests`, EVERY test
+  here opens an `Application` first -- load-bearing, not stylistic:
+  constructing a `BColorControl` with no `BApplication` yet in the
+  process hangs forever (see "ColorControl" above). Deliberately does NOT
+  include a test that actually fires `OnColorChanged` -- read
+  `managed/Tests/ColorControlTests.cs`'s own class remarks and
+  "ColorControl" above before trying to add one.
 - `BRadioButton` (class `RadioButtonTests`) -- construction/geometry,
   `Label`/`Value`/`IsChecked`/`IsEnabled` round-tripping, and the same
   ownership rules `BButton`/`BCheckBox` cover, PLUS

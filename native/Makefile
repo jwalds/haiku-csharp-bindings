@@ -6,7 +6,7 @@ CXX ?= g++
 CXXFLAGS ?= -O2 -fPIC -Wall -Wextra -Iinclude
 LDFLAGS ?= -lbe
 
-SRCS := src/hs_application.cpp src/hs_message.cpp src/hs_window.cpp src/hs_view.cpp src/hs_control.cpp src/hs_button.cpp src/hs_text_control.cpp src/hs_checkbox.cpp src/hs_radio_button.cpp src/hs_slider.cpp
+SRCS := src/hs_application.cpp src/hs_message.cpp src/hs_window.cpp src/hs_view.cpp src/hs_control.cpp src/hs_button.cpp src/hs_text_control.cpp src/hs_checkbox.cpp src/hs_radio_button.cpp src/hs_slider.cpp src/hs_color_control.cpp
 OBJS := $(SRCS:.cpp=.o)
 TARGET := libhaikusharp.so
 
@@ -17,7 +17,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CXX) -shared -o $@ $(OBJS) $(LDFLAGS)
 
-%.o: %.cpp include/hs_types.h include/hs_message.h include/hs_application.h include/hs_window.h include/hs_view.h include/hs_control.h include/hs_button.h include/hs_text_control.h include/hs_checkbox.h include/hs_radio_button.h include/hs_slider.h
+%.o: %.cpp include/hs_types.h include/hs_message.h include/hs_application.h include/hs_window.h include/hs_view.h include/hs_control.h include/hs_button.h include/hs_text_control.h include/hs_checkbox.h include/hs_radio_button.h include/hs_slider.h include/hs_color_control.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 clean:

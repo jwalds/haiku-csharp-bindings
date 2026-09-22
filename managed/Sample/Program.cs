@@ -441,10 +441,42 @@ public class DemoSlider : Slider
 	}
 }
 
+/*
+ * A real BColorControl, demonstrating this binding's sixth BControl
+ * slice: Color, CellSize, Layout, plus the shared Label/IsEnabled via
+ * Control -- see "ColorControl" in README.md. Unlike every other
+ * control in this Sample.exe, its position is a Point, not a Rect --
+ * real BColorControl computes its own size from layout+cellSize (see
+ * hs_color_control.h) -- and its Label is applied by ColorControl.cs
+ * itself after construction, not by the native constructor (which has
+ * no label parameter at all).
+ *
+ * Like DemoRadioButton/DemoSlider (and unlike DemoCheckBox), constructing
+ * a BColorControl DOES require a live BApplication to already exist --
+ * see hs_color_control.h's "A SIXTH VERIFIED BApplication REQUIREMENT"
+ * note -- which is why, like DemoTextControl/DemoRadioButton/DemoSlider,
+ * this is only ever constructed from inside DemoWindow's constructor,
+ * itself only ever called from DemoApplication.OnReadyToRun() below,
+ * after Run() has already constructed the owning BApplication.
+ */
+public class DemoColorControl : ColorControl
+{
+	public DemoColorControl()
+		: base(new Point(20, 490), ColorControlLayout.Cells32x8, 6.0f,
+			"demo color control", "Color:", false)
+	{
+	}
+
+	protected override void OnColorChanged()
+	{
+		Console.WriteLine("[12] DemoColorControl color changed, now: " + Color);
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 580), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 680), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
@@ -462,6 +494,7 @@ public class DemoWindow : Window
 		AddChild(new DemoRadioButton(new Rect(20, 354, 380, 374), "demo radio three", "Option C"));
 
 		AddChild(new DemoSlider());
+		AddChild(new DemoColorControl());
 	}
 
 	protected override void OnDestroyed()
@@ -481,7 +514,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, or close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, or close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()
