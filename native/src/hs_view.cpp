@@ -394,7 +394,7 @@ void hs_view_add_child(hs_handle view, hs_handle child)
 	 * under places at offset 0 -- verified empirically with a small
 	 * scratch probe on real Haiku hardware for the HSButton case
 	 * (offsets: BView/BControl/BButton all 0, BInvoker 272 -- see
-	 * KNOWN_ISSUES.md or the Button/Control section of README.md for
+	 * KNOWN_ISSUES.md or the Button/Control section of details.md for
 	 * the probe itself), matching the reasoning hs_window_add_child()'s
 	 * own comment already gives for HSView. AddChild()'s signature only
 	 * ever wants a BView*, so this is the correct, minimal cast for

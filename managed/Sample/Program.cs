@@ -444,7 +444,7 @@ public class DemoSlider : Slider
 /*
  * A real BColorControl, demonstrating this binding's sixth BControl
  * slice: Color, CellSize, Layout, plus the shared Label/IsEnabled via
- * Control -- see "ColorControl" in README.md. Unlike every other
+ * Control -- see "ColorControl" in details.md. Unlike every other
  * control in this Sample.exe, its position is a Point, not a Rect --
  * real BColorControl computes its own size from layout+cellSize (see
  * hs_color_control.h) -- and its Label is applied by ColorControl.cs

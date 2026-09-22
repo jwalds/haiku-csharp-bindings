@@ -106,7 +106,7 @@ wraps everything in a `using (new Application(...))` scoped to the test
 method itself, not a shared static field.
 
 **Where documented in code:** `managed/Tests/WindowTests.cs` (class
-remarks), `managed/Tests/ApplicationTests.cs` (class remarks), README.md's
+remarks), `managed/Tests/ApplicationTests.cs` (class remarks), details.md's
 "BWindow: threading, quitting, and destruction" section.
 
 ---

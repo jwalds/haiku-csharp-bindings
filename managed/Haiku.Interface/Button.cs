@@ -9,7 +9,7 @@ namespace Haiku.Interface
 	 * hs_button.h for the full design rationale -- read it before
 	 * changing anything here). Full BButton parity for the state surface
 	 * (Label/Value/IsEnabled via Control, IsDefault/MakeDefault, IsFlat,
-	 * Behavior) -- see README.md's Button/Control section for the click-
+	 * Behavior) -- see details.md's Button/Control section for the click-
 	 * mechanism scope decision (a direct OnClick hook, no BMessage/
 	 * BInvoker/target plumbing) and why it was made that way.
 	 *

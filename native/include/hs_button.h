@@ -23,7 +23,7 @@
  * This was a deliberate scope decision (BeAPI-faithful message-passing
  * was considered and rejected as more ceremony than this binding's
  * C#-idiomatic hook style -- see OnMouseDown/OnDraw/etc. in hs_view.h --
- * calls for) -- see README.md's "Button: why a direct OnClick hook" for
+ * calls for) -- see details.md's "Button: why a direct OnClick hook" for
  * the full writeup.
  *
  * WHY BUTTON DOESN'T GET ITS OWN DRAW/ATTACHED/MOUSE/KEY CALLBACKS
@@ -45,7 +45,7 @@
  * offset 0 (a small native probe on real Haiku hardware confirmed this
  * empirically for the whole BView/BControl/BButton chain, with BInvoker
  * -- BControl's OTHER base -- at a nonzero offset instead; see
- * hs_view.cpp's hs_view_add_child() comment and README.md's Button
+ * hs_view.cpp's hs_view_add_child() comment and details.md's Button
  * section for the probe itself), so casting the opaque handle straight
  * to BView*, exactly like hs_view_add_child()/hs_window_add_child()
  * already do, reaches the correct BView subobject regardless of whether

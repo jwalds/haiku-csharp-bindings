@@ -23,7 +23,7 @@
  * this binding builds under places at offset 0. Verified empirically on
  * real Haiku hardware for both chains with small scratch probes (see
  * hs_button.cpp's original probe, from the Button/Control slice, and
- * README.md's Text field section for the HSTextControl one) before
+ * details.md's Text field section for the HSTextControl one) before
  * either relied on it.
  *
  * WHY THIS DOESN'T ALSO ABSORB Frame/MoveTo/ResizeTo
