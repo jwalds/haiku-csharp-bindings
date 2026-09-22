@@ -92,6 +92,19 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void RadioButtonDestroyedCallback(IntPtr userData);
 
+	/* Slider delegate shapes matching hs_slider.h's callback typedefs
+	 * exactly. No BMessage/target involved in either -- same "TWO
+	 * DIFFERENT 'CHANGED' EVENTS" shape as TextControl's own two hooks,
+	 * see hs_slider.h's note of that name. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void SliderValueChangedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void SliderValueCommittedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void SliderDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -461,5 +474,78 @@ namespace Haiku.Interface
 		[DllImport(Lib)]
 		internal static extern void hs_radio_button_set_destroyed_callback(IntPtr radioButton,
 			RadioButtonDestroyedCallback callback, IntPtr userData);
+
+		/* Slider -- see hs_slider.h for the full design rationale,
+		 * including the "BAPPLICATION-AT-CONSTRUCTION: CONFIRMED
+		 * REQUIRED" note on hs_slider_create (matching TextControl/
+		 * RadioButton, not CheckBox), and the "ONE NATIVE CONSTRUCTOR
+		 * FUNCTION, NOT TWO" note explaining why there is only one
+		 * create function despite real BSlider having three frame-based
+		 * constructor overloads. Label/Value/IsEnabled are NOT declared
+		 * here either -- same shared hs_control_* block used by every
+		 * other control's handle. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_slider_create(HsRect frame, string name,
+			string label, int minValue, int maxValue, uint orientation,
+			uint thumbStyle, uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_destroy(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_value_changed_callback(IntPtr slider,
+			SliderValueChangedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_value_committed_callback(IntPtr slider,
+			SliderValueCommittedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_destroyed_callback(IntPtr slider,
+			SliderDestroyedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_limits(IntPtr slider, int minimum, int maximum);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_get_limits(IntPtr slider, out int minimum, out int maximum);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_position(IntPtr slider, float position);
+
+		[DllImport(Lib)]
+		internal static extern float hs_slider_position(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_slider_orientation(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_orientation(IntPtr slider, uint orientation);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_slider_style(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_style(IntPtr slider, uint style);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_limit_labels(IntPtr slider,
+			string minLabel, string maxLabel);
+
+		/* Both return a pointer into BSlider's own internal storage, same
+		 * borrowed-pointer situation as hs_text_control_text above --
+		 * Slider.cs's MinLimitLabel/MaxLimitLabel getters copy them into
+		 * managed strings immediately via Marshal.PtrToStringAnsi. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_slider_min_limit_label(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_slider_max_limit_label(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern int hs_slider_key_increment_value(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_key_increment_value(IntPtr slider, int value);
 	}
 }

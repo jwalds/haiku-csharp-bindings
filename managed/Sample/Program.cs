@@ -386,10 +386,54 @@ public class DemoRadioButton : RadioButton
 	}
 }
 
+/*
+ * A real BSlider, demonstrating this binding's Slider slice: Position/
+ * Minimum/Maximum (via SetLimits), Orientation, Style, limit labels, and
+ * KeyIncrementValue, plus the two distinct change events -- OnValueChanged
+ * (fires repeatedly while the thumb is being dragged) and OnValueCommitted
+ * (fires once, when the mouse button is released) -- see hs_slider.h's
+ * "TWO DIFFERENT 'CHANGED' EVENTS" note for why these are separate hooks,
+ * same shape as DemoTextControl's own OnTextChanged/OnTextCommitted pair.
+ * Neither has automated coverage for actually firing (see SliderTests.cs's
+ * class remarks), so -- same division of labor as every other input hook
+ * in this file -- both are verified interactively here instead: drag the
+ * thumb to see [11] ValueChanged lines stream to the console live, then
+ * release the mouse to see the single [11] ValueCommitted line with the
+ * value that was actually committed.
+ *
+ * Like DemoRadioButton (and unlike DemoCheckBox), constructing a BSlider
+ * DOES require a live BApplication to already exist -- see hs_slider.h's
+ * "BAPPLICATION-AT-CONSTRUCTION" note -- which is why, like
+ * DemoTextControl/DemoRadioButton, this is only ever constructed from
+ * inside DemoWindow's constructor, itself only ever called from
+ * DemoApplication.OnReadyToRun() below, after Run() has already
+ * constructed the owning BApplication.
+ */
+public class DemoSlider : Slider
+{
+	public DemoSlider()
+		: base(new Rect(20, 388, 380, 453), "demo slider", "Volume:", 0, 100)
+	{
+		SetLimitLabels("Quiet", "Loud");
+		KeyIncrementValue = 5;
+		Position = 0.5f;
+	}
+
+	protected override void OnValueChanged()
+	{
+		Console.WriteLine("[11] DemoSlider value changed, now: " + Value);
+	}
+
+	protected override void OnValueCommitted()
+	{
+		Console.WriteLine("[11] DemoSlider value committed: " + Value);
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 470), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 580), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
@@ -405,6 +449,8 @@ public class DemoWindow : Window
 		AddChild(new DemoRadioButton(new Rect(20, 310, 380, 330), "demo radio one", "Option A"));
 		AddChild(new DemoRadioButton(new Rect(20, 332, 380, 352), "demo radio two", "Option B"));
 		AddChild(new DemoRadioButton(new Rect(20, 354, 380, 374), "demo radio three", "Option C"));
+
+		AddChild(new DemoSlider());
 	}
 
 	protected override void OnDestroyed()
@@ -424,7 +470,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, or close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, or close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()

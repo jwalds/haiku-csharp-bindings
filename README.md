@@ -85,9 +85,9 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton/Slider)
 
-Eight slices so far: `BWindow` (the first), a second, deliberately
+Nine slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
@@ -117,10 +117,23 @@ below), plus a friendlier `IsChecked` bool on top of the inherited
 `RadioButton` (no grouping API of this binding's own at all), and a
 genuinely surprising, hardware-verified asymmetry: `CheckBox` needs no
 live `BApplication` to construct in a fresh process, but `RadioButton`
-does, despite the two being structurally almost identical. `GetMouse()`
-polling, drag & drop, layout/`FrameResized`/`FrameMoved`, and every other
-`BControl`-derived widget (slider, ...) are deferred to a follow-up slice
--- see "Not yet covered" below. This kit lives in its own
+does, despite the two being structurally almost identical -- and now a
+ninth: `Slider`, this binding's fifth `BControl`-derived widget, reusing
+`TextControl`'s own modification-message/`Invoke()` split (see "Slider"
+below) for two distinct hooks (`OnValueChanged`/`OnValueCommitted`) in
+place of BeAPI's own plumbing, `Position`/`Minimum`/`Maximum`/
+`Orientation`/`Style`/limit labels/`KeyIncrementValue` on top of the
+inherited `Label`/`Value`/`IsEnabled`, and two more hardware-verified
+facts: `BSlider` needs a live `BApplication` to construct, matching
+`TextControl`/`RadioButton` rather than `CheckBox`, and real BeAPI's own
+three frame-based constructor overloads collapse to a single native
+`hs_slider_create()` taking an explicit orientation argument, since the
+no-orientation overload was confirmed equivalent to explicitly passing
+`B_HORIZONTAL`. `GetMouse()` polling, drag & drop, layout/
+`FrameResized`/`FrameMoved`, `Slider`'s own hash marks/bar-fill colors/
+custom icon/snooze amount, and every other `BControl`-derived widget
+(`BColorControl`, `BPictureButton`, `BStatusBar`, ...) are deferred to a
+follow-up slice -- see "Not yet covered" below. This kit lives in its own
 assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
 `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
@@ -228,6 +241,24 @@ future kits (Storage, etc.) to also get their own assembly.
   `BApplication` exists in the process hangs forever rather than failing
   fast, and its constructor silently overrides whatever height its frame
   argument asks for.
+- `Haiku.Interface.Slider` -- wraps a native `BSlider` subclass
+  (`HSSlider`, in `native/`), deriving from `Control` (so it gets
+  `Label`/`Value`/`IsEnabled` for free, same as `Button`/`TextControl`).
+  `Position` (float get/set), `Minimum`/`Maximum` (via `SetLimits`),
+  `Orientation`, `Style`, `MinLimitLabel`/`MaxLimitLabel` (via
+  `SetLimitLabels`), `KeyIncrementValue`, and `OnValueChanged` (fires
+  repeatedly while the thumb is being dragged) / `OnValueCommitted`
+  (fires once, on mouse-up) -- both direct hooks, no `BMessage`/target
+  involved. See "Slider" below before touching `Slider.cs`, `Control.cs`,
+  or `hs_slider.cpp` -- in particular, constructing one before a
+  `BApplication` exists in the process hangs forever, same as
+  `TextControl`/`RadioButton`.
+- `Haiku.Interface.SliderOrientation` -- Haiku's `orientation` enum
+  (`B_HORIZONTAL`/`B_VERTICAL`), a plain sequential enum (0/1), verified
+  against the actual installed `InterfaceDefs.h`.
+- `Haiku.Interface.ThumbStyle` -- Haiku's `thumb_style` enum
+  (`B_BLOCK_THUMB`/`B_TRIANGLE_THUMB`), a plain sequential enum (0/1),
+  verified against the actual installed `Slider.h`.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
 identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
@@ -235,15 +266,19 @@ beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
 DRAWING note), `AddChild`'s `before` (insert position) parameter, any
 `BControl`-derived widget other than `Button`/`TextControl`/`CheckBox`/
-`RadioButton` (slider, ...), `TextControl`'s own `Divider`/`Alignment` and
-the underlying `BTextView` it wraps (see "TextControl" below for that
-scope decision), and any real `BMessage`/`BInvoker`/target-based
-invocation (`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/
-`OnTextCommitted`, and `CheckBox`'s/`RadioButton`'s own `OnClick` are all
-direct callbacks instead -- see "Button/Control", "TextControl", and
-"CheckBox/RadioButton" below) -- deliberately deferred to a follow-up
-slice rather than folded into this one. Also not yet covered: everything
-else in Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
+`RadioButton`/`Slider` (`BColorControl`, `BPictureButton`, `BStatusBar`,
+...), `TextControl`'s own `Divider`/`Alignment` and the underlying
+`BTextView` it wraps (see "TextControl" below for that scope decision),
+`Slider`'s own hash marks/tick marks, bar/fill colors, a custom icon, the
+snooze amount, and `UpdateText()` (see "Slider" below for that scope
+decision), and any real `BMessage`/`BInvoker`/target-based invocation
+(`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/`OnTextCommitted`,
+`CheckBox`'s/`RadioButton`'s own `OnClick`, and `Slider`'s
+`OnValueChanged`/`OnValueCommitted` are all direct callbacks instead --
+see "Button/Control", "TextControl", "CheckBox/RadioButton", and
+"Slider" below) -- deliberately deferred to a follow-up slice rather
+than folded into this one. Also not yet covered: everything else in
+Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -828,6 +863,92 @@ three `DemoRadioButton`s ("Option A"/"Option B"/"Option C") were
 confirmed rendering correctly, and the whole demo window confirmed
 correctly sized to fit them, via a real screenshot on the Haiku box.
 
+## Slider: reusing TextControl's two-event split, a fifth verified BApplication requirement, and one native constructor instead of three
+
+`Slider` is this binding's fifth `BControl`-derived widget. Its two
+distinct-events shape is not new: real `BSlider` fires a modification
+message repeatedly while the thumb is being dragged, and its inherited
+`Invoke()` fires once when the mouse button is released -- exactly the
+same repeated-while-editing/once-on-commit split `BTextControl` already
+has (see "TextControl" above), and the Be Book's own docs describe it in
+those same terms. `HSSlider` (`native/include/hs_slider.h`,
+`native/src/hs_slider.cpp`) therefore reuses `HSTextControl`'s own
+trampoline verbatim: intercept the modification message in
+`MessageReceived()` and fire `OnValueChanged` from it, override
+`Invoke()` for the one-shot `OnValueCommitted`, and call `SetTarget(this)`
+twice -- once in the constructor (where the `BMessenger` it captures has
+no valid `Looper` yet) and again from an overridden `AttachedToWindow()`
+(where it does) -- for the same reason documented in "TextControl" above.
+This scope note is honest about what wasn't re-verified: the
+`SetTarget(this)`-called-twice fix is applied by direct application of
+the already-verified `BMessenger`/`Looper` timing fact from
+`hs_text_control.h`, not re-confirmed with a fresh hardware probe
+specific to `Slider` -- the two widgets share the exact same
+`BInvoker`/`BMessenger` machinery, so there was no new claim to verify.
+
+**A fifth widget, a fifth hardware-verified `BApplication` requirement.**
+Constructing a `BSlider` with no live `BApplication` anywhere in the
+process hangs indefinitely -- confirmed with the same isolated,
+flush-per-step probe technique used for every other widget in this
+binding (nothing else constructed first in the process), matching
+`TextControl`/`RadioButton`, not `CheckBox`. Every single test in
+`SliderTests.cs` wraps its body in `using (new Application(...))`
+accordingly, and `Sample.exe`'s `DemoSlider` is only ever constructed
+inside `DemoWindow`'s own constructor, called from `OnReadyToRun()`,
+after `Run()` has already constructed the `Application` -- same pattern
+as `DemoTextControl`/`DemoRadioButton`.
+
+**One native constructor function, not three -- verified equivalent on
+hardware, not assumed.** Real `BSlider` has three frame-based
+constructors: one with no `orientation` parameter (defaulting to
+`B_HORIZONTAL`), one that takes `orientation` explicitly, and a
+name/label-only one belonging to BeAPI's newer layout API (out of scope
+here, like layout everywhere else in this binding). Rather than mirror
+both of the first two natively, a small probe constructed a `BSlider`
+both ways and compared `Orientation()` afterward: the no-orientation
+overload came back `B_HORIZONTAL` (0), identical to explicitly passing
+it. On the strength of that, `hs_slider_create()` collapses to a single
+native constructor function that always takes an explicit `orientation`
+argument -- `Slider`'s own C# convenience overload (no orientation
+parameter) supplies `SliderOrientation.Horizontal` from the managed side
+instead of needing a second native entry point.
+
+**The exact `Position()`/`Value()`/`SetPosition()`/`SetValue()`
+relationship was hardware-verified, not assumed, before `SliderTests.cs`
+asserted anything about it.** A small probe confirmed `SetPosition(0.0)`
+and `SetPosition(1.0)` round-trip through `Position()` with zero
+floating-point error at a slider's minimum/maximum, and that `SetValue()`
+at the exact midpoint of a configured range (`SetLimits(0, 100)` then
+`SetValue(50)`, and again after `SetLimits(10, 20)` then `SetValue(15)`)
+comes back as `Position() == 0.5` exactly, both before and after
+`SetLimits` changes the range. `SliderTests.cs` only exercises those
+specific, hardware-confirmed-exact values rather than an arbitrary
+interior position that could be quantized differently.
+
+**Scope.** `Position`/`Minimum`-`Maximum` (via `SetLimits`)/
+`Orientation`/`Style`/limit labels (via `SetLimitLabels`)/
+`KeyIncrementValue`, plus the shared `Label`/`Value`/`IsEnabled` via
+`Control` -- hash marks/tick marks, bar/fill colors, a custom icon, the
+snooze amount, and `UpdateText()` are real `BSlider` API this binding
+does not expose yet, a deliberate scope decision (captured in
+`hs_slider.h`'s own header comment), not an oversight.
+
+**Verification.** `SliderTests.cs` (module `BSlider`) covers
+construction/geometry, `Label`/`IsEnabled` (re-verified against this
+fifth concrete control type), `Minimum`/`Maximum` round-tripping via
+`SetLimits`, the `Position`/`Value` relationship described above,
+`Orientation`/`Style` round-tripping (including both constructor
+overloads), limit-label round-tripping, `KeyIncrementValue`
+round-tripping, and the same `AddChild`/`RemoveChild`/
+`Dispose()`-while-attached/cascade-on-destroy ownership rules every
+other widget in this binding covers. It deliberately does not attempt to
+fire `OnValueChanged`/`OnValueCommitted` automatically, same reasoning as
+every other input hook in this binding. Real event-firing is verified
+visually instead: `Sample.exe`'s `DemoSlider` ("Volume:", with "Quiet"/
+"Loud" limit labels) was confirmed rendering correctly -- track, thumb,
+and both limit labels fully visible with no clipping -- via a real
+screenshot on the Haiku box.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -872,18 +993,21 @@ effect visible on screen, and a group of three real `DemoRadioButton`s
 ("Option A"/"Option B"/"Option C") demonstrating BeAPI's own automatic
 mutual-exclusivity grouping live -- clicking one visibly unchecks the
 others with no grouping code anywhere in this binding (see
-"CheckBox/RadioButton" above) -- and waits for you to close it (its
-title bar's close box), at which point `WindowFlags.QuitOnWindowClose`
-signals the owning `BApplication` to quit too.
+"CheckBox/RadioButton" above) -- and a real `DemoSlider` ("Volume:", with
+"Quiet"/"Loud" limit labels) beneath that, logging every drag tick and
+every committed value (see "Slider" above) -- and waits for you to close
+it (its title bar's close box), at which point
+`WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
+too.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", and the DemoRadioButton group "Option A"/"Option B"/"Option C"](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", and the DemoSlider "Volume:" control with its "Quiet"/"Loud" limit labels](screenshots/sample-demo.png)
 
 Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, or close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, or close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -935,6 +1059,13 @@ on screen with no code in `DemoRadioButton`/`RadioButton` driving that --
 the actual verification for `RadioButton`'s automatic grouping, same
 "there's no synthetic way to fire a real click" reasoning as
 `DemoCheckBox`/`DemoButton` above.
+
+Dragging the "Volume:" slider's thumb prints a `[11] DemoSlider value
+changed, now: N` line on every drag tick, and releasing the mouse button
+prints a single `[11] DemoSlider value committed: N` line with whatever
+value was actually committed -- the actual verification for
+`OnValueChanged`/`OnValueCommitted`, since (per "Slider" above) there's
+no automated or synthetic way to fire a real drag/mouse-release either.
 
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
@@ -1014,6 +1145,11 @@ left on screen BEFORE that test runs, with its result appended once known:
   LabelRoundTrips ... PASS
   ...
 
+== BSlider ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  LabelRoundTrips ... PASS
+  ...
+
 == BTextControl ==
   ConstructionAndGeometryRoundTrip ... PASS
   TextRoundTripsFromConstructor ... PASS
@@ -1025,7 +1161,7 @@ left on screen BEFORE that test runs, with its result appended once known:
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-98 passed, 0 failed, 0 errored
+115 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -1046,7 +1182,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Nine modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Ten modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -1102,6 +1238,21 @@ today:
   load-bearing, not stylistic: constructing a `BRadioButton` with no
   `BApplication` yet in the process hangs forever, unlike `BCheckBox`.
   Deliberately does NOT include a test that actually fires `OnClick`.
+- `BSlider` (class `SliderTests`) -- construction/geometry, `Label`/
+  `IsEnabled` round-tripping (re-verified against this fifth concrete
+  control type), `Minimum`/`Maximum` round-tripping via `SetLimits`, the
+  hardware-verified `Position`/`Value` relationship (see "Slider" above
+  for why only exact, verified values are asserted), `Orientation`/
+  `Style` round-tripping (including both constructor overloads),
+  limit-label round-tripping, `KeyIncrementValue` round-tripping, and the
+  same ownership rules every other module covers. Like
+  `TextControlTests`/`RadioButtonTests`, EVERY test here opens an
+  `Application` first -- load-bearing, not stylistic: constructing a
+  `BSlider` with no `BApplication` yet in the process hangs forever (see
+  "Slider" above). Deliberately does NOT include a test that actually
+  fires `OnValueChanged`/`OnValueCommitted` -- read
+  `managed/Tests/SliderTests.cs`'s own class remarks and "Slider" above
+  before trying to add one.
 - `BTextControl` (class `TextControlTests`) -- construction/geometry
   (with a real caveat: BTextControl's constructor overrides whatever
   height the frame argument asks for, see "TextControl" above and the
