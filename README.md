@@ -85,9 +85,9 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton)
 
-Six slices so far: `BWindow` (the first), a second, deliberately
+Eight slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
@@ -102,17 +102,25 @@ its own) -- a fifth: `Button`/`Control`, this binding's first
 `BControl`-derived widget, with a direct `OnClick` hook rather than
 BeAPI's own `BMessage`/`BInvoker`/target plumbing (see "Button/Control"
 below for that scope decision, the shared `ViewBase` refactor it required,
-and the ABI-offset fact that refactor rests on) -- and now a sixth:
+and the ABI-offset fact that refactor rests on) -- a sixth:
 `TextControl`, this binding's second `BControl`-derived widget, adding
 `Text`/`SetText` plus two distinct direct hooks (`OnTextChanged`/
 `OnTextCommitted`) in place of BeAPI's own modification-message/`Invoke()`
 plumbing, and moving `Label`/`Value`/`IsEnabled` out of `Button`'s own
 shim into a new shared `hs_control.h` both widgets now call (see
 "TextControl" below for the design, the native-side split, and two more
-things verified on hardware rather than assumed). `GetMouse()` polling,
-drag & drop, layout/`FrameResized`/`FrameMoved`, and every other
-`BControl`-derived widget (checkbox, radio button, ...) are deferred to a
-follow-up slice -- see "Not yet covered" below. This kit lives in its own
+things verified on hardware rather than assumed) -- and now a seventh and
+eighth, together: `CheckBox` and `RadioButton`, reusing that same
+`Invoke()`-override/`hs_control.h` shape (see "CheckBox/RadioButton"
+below), plus a friendlier `IsChecked` bool on top of the inherited
+`Value`, real BeAPI's own fully-automatic mutual-exclusivity grouping for
+`RadioButton` (no grouping API of this binding's own at all), and a
+genuinely surprising, hardware-verified asymmetry: `CheckBox` needs no
+live `BApplication` to construct in a fresh process, but `RadioButton`
+does, despite the two being structurally almost identical. `GetMouse()`
+polling, drag & drop, layout/`FrameResized`/`FrameMoved`, and every other
+`BControl`-derived widget (slider, ...) are deferred to a follow-up slice
+-- see "Not yet covered" below. This kit lives in its own
 assembly, `Haiku.Interface.dll` (referencing `Haiku.App.dll` for
 `Rect`/`Point`/`Message`/`HaikuException`), mirroring how Haiku itself
 splits the Application and Interface Kits -- and setting the pattern for
@@ -226,15 +234,16 @@ identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
 beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
 DRAWING note), `AddChild`'s `before` (insert position) parameter, any
-`BControl`-derived widget other than `Button`/`TextControl` (checkbox,
-radio button, slider, ...), `TextControl`'s own `Divider`/`Alignment` and
+`BControl`-derived widget other than `Button`/`TextControl`/`CheckBox`/
+`RadioButton` (slider, ...), `TextControl`'s own `Divider`/`Alignment` and
 the underlying `BTextView` it wraps (see "TextControl" below for that
 scope decision), and any real `BMessage`/`BInvoker`/target-based
-invocation (`Button`'s `OnClick` and `TextControl`'s `OnTextChanged`/
-`OnTextCommitted` are direct callbacks instead -- see "Button/Control"
-and "TextControl" below) -- deliberately deferred to a follow-up slice
-rather than folded into this one. Also not yet covered: everything else
-in Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
+invocation (`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/
+`OnTextCommitted`, and `CheckBox`'s/`RadioButton`'s own `OnClick` are all
+direct callbacks instead -- see "Button/Control", "TextControl", and
+"CheckBox/RadioButton" below) -- deliberately deferred to a follow-up
+slice rather than folded into this one. Also not yet covered: everything
+else in Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -720,6 +729,105 @@ session -- same "verified by running it and looking" category as every
 other hook in this binding, just not yet actually run by a human this
 time.
 
+## CheckBox/RadioButton: reusing Invoke(), automatic grouping verified on hardware, and a real CheckBox/RadioButton asymmetry
+
+`CheckBox` and `RadioButton` are this binding's third and fourth
+`BControl`-derived widgets, added together since they share almost their
+entire shape. Both reuse `Control`/`ViewBase`/`hs_control.h` exactly like
+`Button`/`TextControl` do, and both override `Invoke()` exactly like
+`HSButton::Invoke()` does -- no `BMessage`/`BInvoker`/target plumbing, a
+direct `OnClick` callback instead, firing after BeAPI's own `MouseUp()`/
+`KeyDown()` has already toggled `Value` (and, for `RadioButton`, already
+turned off any sibling radio buttons -- see below). Both add the same
+`IsChecked` bool convenience property on top of the inherited `Value`
+(`B_CONTROL_ON`=1/`B_CONTROL_OFF`=0), matching how `Button` added
+`IsDefault`/`IsFlat` beyond raw `Control` state.
+
+**Automatic mutual-exclusivity grouping needs zero code in this binding
+-- verified on hardware, not just trusted from the docs.** Real BeAPI's
+own `BRadioButton` groups purely by shared parent `BView`: turn one radio
+button on, and every sibling radio button under the same parent turns
+off automatically. Since this binding's `AddChild`/`RemoveChild` already
+just delegate to native `BView` parenting, grouping needed no dedicated
+API at all -- no `RadioGroup` type, no explicit "join this group" call.
+A native probe on real Haiku hardware confirmed it: three `BRadioButton`s
+added as children of one shared, unshown `BView` (no `BWindow`, no
+`Show()`, no `Application.Run()` beyond the live `BApplication`
+construction below already requires), driven purely through `SetValue()`
+-- turning one on instantly and correctly turned the previously-on
+sibling off, every time. `RadioButtonTests.AutomaticGroupingTurnsOffSiblings`
+is the same pattern, automated.
+
+One related caveat, found while isolating the above rather than looked
+for on purpose: driving `SetValue()` against a radio button that IS a
+child of an already-`Show()`n `Window`, from a thread other than the one
+that would run `Application.Run()` (which nothing in this test suite
+ever calls), can hang -- reproduced with a plain native, non-Mono probe,
+so it isn't specific to this binding's Mono embedding layer. This is the
+same underlying hazard [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) issue #4
+already documents for `Draw()` (there root-caused to "`Show()` from a
+thread other than the one running `Application.Run()`, with `Run()`
+never called at all"), now confirmed to extend to at least one more
+operation. It isn't a new restriction in practice -- every test file in
+this suite already follows a "never call `Show()` on a test window" rule
+-- but it's the concrete reason `RadioButtonTests`' own grouping test
+uses an unshown parent `View` rather than a real, shown `Window`.
+
+**A genuine, unexplained asymmetry: `CheckBox` needs no live
+`BApplication` to construct; `RadioButton` does, in a process where none
+has ever run yet.** Both are simple, single-inheritance `BControl`
+subclasses with just a label -- no owned sub-`BTextView`, no obvious
+font-metrics-driven layout step the way `BTextControl` has. A
+flush-per-step native probe confirmed `BCheckBox` constructs and deletes
+cleanly with no `BApplication` anywhere in the process, matching
+`BView`/`BButton`. The same probe, run immediately afterward in the same
+process, hung indefinitely on `BRadioButton` construction -- and, to rule
+out any same-process ordering artifact, a second probe that constructed
+*only* a `BRadioButton*`, nothing else, in a fresh process, hung at the
+exact same point. `BRadioButton` matches `BTextControl`'s own
+construction-time `BApplication` requirement; `BCheckBox` does not. The
+root cause of this asymmetry between two structurally near-identical
+widgets is not understood -- recorded as a verified hardware fact to
+design around, not a solved mystery, per this project's standing rule to
+verify rather than assume and to document real surprises even
+unexplained ones. Practical consequence: every single test in
+`RadioButtonTests.cs`, including pure construction/geometry ones, wraps
+its body in `using (new Application(...))`, matching
+`TextControlTests.cs`; `Sample.exe`'s `DemoRadioButton`s are likewise
+only ever constructed inside `DemoWindow`'s own constructor, called from
+`OnReadyToRun()`, after `Run()` has already constructed the `Application`.
+
+**A second, narrower surprise found while wiring up `CheckBoxTests.cs`:
+the "no BApplication needed" guarantee only holds if none has EVER
+existed in the process, not merely "none currently live."** Running
+`Tests.exe`'s full suite -- `ButtonTests` first, which constructs and
+disposes several never-`Run()` `Application`s of its own, then
+`CheckBoxTests` -- reproducibly hung on `CheckBoxTests`' very first,
+construction-only test, even though that identical test passes instantly
+when `CheckBoxTests` is run alone (`mono Tests.exe CheckBox`). So
+`CheckBoxTests.cs` wraps every test in `using (new Application(...))`
+anyway, purely for safety against this suite's own module run order, even
+though construction alone doesn't strictly need it in a truly fresh
+process (a real app that constructs one `Application` and keeps it for
+the app's whole lifetime -- the normal pattern -- never hits this at
+all). See `hs_checkbox.h`'s own caveat for the full writeup.
+
+**Verification.** `CheckBoxTests.cs` (module `BCheckBox`) and
+`RadioButtonTests.cs` (module `BRadioButton`) cover everything that
+doesn't need a real click: construction/geometry, `Label`/`IsEnabled`
+(re-verified against these two more concrete control types), `Value`/
+`IsChecked` round-tripping, the automatic-grouping regression described
+above, and the same `AddChild`/`RemoveChild`/`Dispose()`-while-attached/
+cascade-on-destroy ownership rules `ButtonTests.cs`/`TextControlTests.cs`
+already cover. Neither file attempts to fire `OnClick` automatically,
+same reasoning as every other input hook in this binding. Real
+click-firing and the live grouping effect are verified visually instead:
+`Sample.exe`'s `DemoCheckBox` ("Enable the text field above", toggling
+`DemoTextControl.IsEnabled` to make `IsChecked`'s effect visible) and
+three `DemoRadioButton`s ("Option A"/"Option B"/"Option C") were
+confirmed rendering correctly, and the whole demo window confirmed
+correctly sized to fit them, via a real screenshot on the Haiku box.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -758,18 +866,24 @@ calls), takes keyboard focus and tracks mouse/keyboard input live (see
 updates its own label with a running click count and disables itself
 after three clicks (see "Button/Control" above), a real `DemoTextControl`
 ("Type here:") beneath that which logs every edit and every commit (see
-"TextControl" above), and waits for you to close it (its title bar's
-close box), at which point `WindowFlags.QuitOnWindowClose` signals the
-owning `BApplication` to quit too.
+"TextControl" above), a real `DemoCheckBox` ("Enable the text field
+above") that toggles `DemoTextControl.IsEnabled` to make `IsChecked`'s
+effect visible on screen, and a group of three real `DemoRadioButton`s
+("Option A"/"Option B"/"Option C") demonstrating BeAPI's own automatic
+mutual-exclusivity grouping live -- clicking one visibly unchecks the
+others with no grouping code anywhere in this binding (see
+"CheckBox/RadioButton" above) -- and waits for you to close it (its
+title bar's close box), at which point `WindowFlags.QuitOnWindowClose`
+signals the owning `BApplication` to quit too.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, and the DemoTextControl "Type here:" field](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", and the DemoRadioButton group "Option A"/"Option B"/"Option C"](screenshots/sample-demo.png)
 
 Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, or close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, or close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -805,6 +919,22 @@ actually committed. That's the actual verification for
 `OnTextChanged`/`OnTextCommitted`, since (per "TextControl" above)
 there's no automated or synthetic way to fire a real keystroke or focus
 change either.
+
+Toggling the "Enable the text field above" checkbox prints `[9]
+DemoCheckBox clicked, IsChecked=True` (or `False`) followed by `[9]
+DemoTextControl.IsEnabled set to True` (or `False`) via DemoCheckBox.,
+and the text field visibly grays out/un-grays to match -- the actual
+verification for `OnClick`/`IsChecked`, since (per "CheckBox/RadioButton"
+above) there's no automated or synthetic way to fire a real click either.
+
+Clicking any of the "Option A"/"Option B"/"Option C" radio buttons prints
+a single `[10] "Option X" selected (its sibling radio buttons were
+automatically turned off by real BeAPI -- no code in this binding does
+that).` line, and the previously-selected radio button visibly turns off
+on screen with no code in `DemoRadioButton`/`RadioButton` driving that --
+the actual verification for `RadioButton`'s automatic grouping, same
+"there's no synthetic way to fire a real click" reasoning as
+`DemoCheckBox`/`DemoButton` above.
 
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
@@ -874,6 +1004,16 @@ left on screen BEFORE that test runs, with its result appended once known:
   LabelRoundTrips ... PASS
   ...
 
+== BCheckBox ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  LabelRoundTrips ... PASS
+  ...
+
+== BRadioButton ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  LabelRoundTrips ... PASS
+  ...
+
 == BTextControl ==
   ConstructionAndGeometryRoundTrip ... PASS
   TextRoundTripsFromConstructor ... PASS
@@ -885,7 +1025,7 @@ left on screen BEFORE that test runs, with its result appended once known:
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-75 passed, 0 failed, 0 errored
+98 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -906,7 +1046,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Seven modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Nine modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -941,6 +1081,27 @@ today:
   include a test that actually fires `OnClick` -- read
   `managed/Tests/ButtonTests.cs`'s own class remarks and "Button/Control"
   above before trying to add one.
+- `BCheckBox` (class `CheckBoxTests`) -- construction/geometry,
+  `Label`/`Value`/`IsChecked`/`IsEnabled` round-tripping (re-verified
+  against this third concrete control type), and the same ownership
+  rules `BButton` covers for `Button`. Every test here opens a `using
+  (new Application(AppSignature))` too, DESPITE `hs_checkbox.h`'s own
+  "no BApplication needed" finding -- purely for safety against this
+  suite's own module run order, see "CheckBox/RadioButton" above and
+  this file's own class remarks for the real hang that motivated it.
+  Deliberately does NOT include a test that actually fires `OnClick`.
+- `BRadioButton` (class `RadioButtonTests`) -- construction/geometry,
+  `Label`/`Value`/`IsChecked`/`IsEnabled` round-tripping, and the same
+  ownership rules `BButton`/`BCheckBox` cover, PLUS
+  `AutomaticGroupingTurnsOffSiblings`, this project's automated
+  regression for real BeAPI's own mutual-exclusivity grouping -- driven
+  entirely through `IsChecked`/`SetValue` against radio buttons under an
+  unshown parent `View`, since (per "CheckBox/RadioButton" above) driving
+  the same thing against a `Show()`n `Window` can hang. Like
+  `TextControlTests`, EVERY test here opens an `Application` first --
+  load-bearing, not stylistic: constructing a `BRadioButton` with no
+  `BApplication` yet in the process hangs forever, unlike `BCheckBox`.
+  Deliberately does NOT include a test that actually fires `OnClick`.
 - `BTextControl` (class `TextControlTests`) -- construction/geometry
   (with a real caveat: BTextControl's constructor overrides whatever
   height the frame argument asks for, see "TextControl" above and the

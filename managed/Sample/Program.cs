@@ -7,8 +7,10 @@ using Haiku.Interface;
  * A minimal, runnable example of this binding's Interface Kit slice: a
  * BWindow you can actually see and close, containing a BView that actually
  * draws something and responds to mouse and keyboard input, a real
- * BButton you can click, and a real BTextControl you can type into. This
- * is NOT where verification of the binding lives -- see managed/Tests/
+ * BButton you can click, a real BTextControl you can type into, a real
+ * BCheckBox, and a group of three real, automatically-mutually-exclusive
+ * BRadioButtons. This is NOT where verification of the binding lives --
+ * see managed/Tests/
  * (built as Tests.exe) for the actual regression suite, including
  * WindowTests.QuitPostsRequestAndFiresDestroyedCallback, ViewTests'
  * construction/attach/detach/ownership coverage, ViewInputTests'
@@ -17,15 +19,18 @@ using Haiku.Interface;
  * AddChildUnderPlainViewSucceeds/AddChildUnderWindowSucceeds regressions
  * for the ViewBase refactor Button required), and TextControlTests'
  * Text/Label/IsEnabled coverage re-verified against this second concrete
- * control type -- which all exercise these same paths without needing a
- * human to look at anything. Real hook-firing -- including a real click,
- * or a real keystroke landing in a text field -- has no automated
- * coverage (see ViewInputTests.cs's/ButtonTests.cs's/TextControlTests.cs's
- * class remarks for why, same reasoning as Draw() itself in
- * KNOWN_ISSUES.md issue #4). This file exists purely to be a clear,
- * working starting point for your own windowed app, and -- for DemoView
- * specifically -- to answer a real open question: see DemoView's OnDraw
- * remarks below.
+ * control type, CheckBoxTests'/RadioButtonTests' Value/IsChecked coverage
+ * (plus RadioButtonTests' own AutomaticGroupingTurnsOffSiblings, driven
+ * entirely through SetValue rather than a real click) -- which all
+ * exercise these same paths without needing a human to look at anything.
+ * Real hook-firing -- including a real click, or a real keystroke landing
+ * in a text field -- has no automated coverage (see ViewInputTests.cs's/
+ * ButtonTests.cs's/TextControlTests.cs's/CheckBoxTests.cs's/
+ * RadioButtonTests.cs's class remarks for why, same reasoning as Draw()
+ * itself in KNOWN_ISSUES.md issue #4). This file exists purely to be a
+ * clear, working starting point for your own windowed app, and -- for
+ * DemoView specifically -- to answer a real open question: see DemoView's
+ * OnDraw remarks below.
  *
  * DemoWindow uses WindowFlags.QuitOnWindowClose, so clicking its title bar's
  * close box doesn't just end the window -- BWindow.h's own flag semantics
@@ -40,7 +45,12 @@ using Haiku.Interface;
  * constructing a BTextControl before any BApplication exists in the
  * process hangs forever, so every real app using TextControl needs this
  * same ordering (construct it after your Application, directly or
- * indirectly, never before).
+ * indirectly, never before). The same is true of DemoRadioButton/
+ * BRadioButton -- see hs_radio_button.h's own construction-time note --
+ * but NOT of DemoCheckBox/BCheckBox, which needs no live BApplication to
+ * construct at all (see hs_checkbox.h); it's still constructed here
+ * alongside everything else purely for consistency, not because it has
+ * to be.
  */
 public class DemoView : View
 {
@@ -309,15 +319,92 @@ public class DemoTextControl : TextControl
 	}
 }
 
+/*
+ * A real BCheckBox, demonstrating this binding's CheckBox slice: Label,
+ * a direct OnClick hook, and IsChecked -- the friendlier bool view of
+ * Control.Value added on top of Button's own Label/IsEnabled/OnClick
+ * shape (see hs_checkbox.h). Unlike DemoRadioButton below, constructing
+ * this does NOT require a live BApplication (see hs_checkbox.h's own
+ * note) -- it's constructed here after the Application only for
+ * consistency with the rest of this file, not because it has to be.
+ * Its click handler makes IsChecked's effect visible on screen by
+ * toggling DemoTextControl's IsEnabled -- a disabled BTextControl draws
+ * visibly grayed out and stops accepting keystrokes, the same visible
+ * cue DemoButton already uses for its own IsEnabled.
+ */
+public class DemoCheckBox : CheckBox
+{
+	private readonly TextControl _target;
+
+	public DemoCheckBox(TextControl target)
+		: base(new Rect(20, 284, 380, 304), "demo checkbox", "Enable the text field above")
+	{
+		_target = target;
+		// Matches DemoTextControl's own constructor default (IsEnabled
+		// starts true), so this checkbox's initial state reflects reality.
+		IsChecked = true;
+	}
+
+	protected override void OnClick()
+	{
+		// By the time this fires, IsChecked already reflects the new
+		// state -- BCheckBox toggles Value itself before Invoke() runs
+		// (see hs_checkbox.h's own note).
+		Console.WriteLine("[9] DemoCheckBox clicked, IsChecked=" + IsChecked);
+		_target.IsEnabled = IsChecked;
+		Console.WriteLine("[9] DemoTextControl.IsEnabled set to " + _target.IsEnabled + " via DemoCheckBox.");
+	}
+}
+
+/*
+ * A real BRadioButton, demonstrating this binding's RadioButton slice.
+ * Three of these are added below as direct, sibling children of
+ * DemoWindow (see hs_radio_button.h's grouping note) -- clicking one
+ * visibly turns the other two off, with no grouping code anywhere in
+ * this binding or this file; that's real BeAPI's own automatic
+ * mutual-exclusivity behavior, driven purely by sharing a parent View.
+ * UNLIKE DemoCheckBox, constructing one of these DOES require a live
+ * BApplication to already exist -- see hs_radio_button.h's own note --
+ * which is why, like DemoTextControl, these are only ever constructed
+ * from inside DemoWindow's constructor, itself only ever called from
+ * DemoApplication.OnReadyToRun() below, after Run() has already
+ * constructed the owning BApplication.
+ */
+public class DemoRadioButton : RadioButton
+{
+	public DemoRadioButton(Rect frame, string name, string label)
+		: base(frame, name, label)
+	{
+	}
+
+	protected override void OnClick()
+	{
+		// By the time this fires, real BeAPI has already turned this
+		// radio button on and turned off any sibling radio buttons under
+		// the same parent -- see hs_radio_button.h's grouping note.
+		Console.WriteLine("[10] \"" + Label + "\" selected (its sibling radio buttons were automatically turned off by real BeAPI -- no code in this binding does that).");
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 390), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 470), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
 		AddChild(new DemoButton());
-		AddChild(new DemoTextControl());
+
+		DemoTextControl textControl = new DemoTextControl();
+		AddChild(textControl);
+		AddChild(new DemoCheckBox(textControl));
+
+		// Three siblings under this same DemoWindow -- see
+		// DemoRadioButton's own remarks for why that's all automatic
+		// grouping needs.
+		AddChild(new DemoRadioButton(new Rect(20, 310, 380, 330), "demo radio one", "Option A"));
+		AddChild(new DemoRadioButton(new Rect(20, 332, 380, 352), "demo radio two", "Option B"));
+		AddChild(new DemoRadioButton(new Rect(20, 354, 380, 374), "demo radio three", "Option C"));
 	}
 
 	protected override void OnDestroyed()
@@ -337,7 +424,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, or close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, or close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()

@@ -75,6 +75,23 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void TextControlDestroyedCallback(IntPtr userData);
 
+	/* CheckBox delegate shapes matching hs_checkbox.h's callback typedefs
+	 * exactly. No BMessage/target involved -- see hs_checkbox.h's "NO
+	 * BMessage/BInvoker/TARGET PLUMBING" note. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void CheckBoxClickCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void CheckBoxDestroyedCallback(IntPtr userData);
+
+	/* RadioButton delegate shapes matching hs_radio_button.h's callback
+	 * typedefs exactly. Same "no BMessage/target" shape as CheckBox. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void RadioButtonClickCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void RadioButtonDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -404,5 +421,45 @@ namespace Haiku.Interface
 		 * immediately via Marshal.PtrToStringAnsi. */
 		[DllImport(Lib)]
 		internal static extern IntPtr hs_text_control_text(IntPtr textControl);
+
+		/* CheckBox -- see hs_checkbox.h for the full design rationale.
+		 * Label/Value/IsEnabled are NOT declared here -- see the shared
+		 * hs_control_* block above, reused for a checkbox handle exactly
+		 * as it is for a button's/text control's. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_checkbox_create(HsRect frame, string name,
+			string label, uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_checkbox_destroy(IntPtr checkbox);
+
+		[DllImport(Lib)]
+		internal static extern void hs_checkbox_set_click_callback(IntPtr checkbox,
+			CheckBoxClickCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_checkbox_set_destroyed_callback(IntPtr checkbox,
+			CheckBoxDestroyedCallback callback, IntPtr userData);
+
+		/* RadioButton -- see hs_radio_button.h for the full design
+		 * rationale, including the "REQUIRES A LIVE BApplication TO
+		 * ALREADY EXIST" note on hs_radio_button_create -- matching
+		 * hs_text_control_create's own such note, but NOT shared by
+		 * hs_checkbox_create above. Label/Value/IsEnabled are NOT
+		 * declared here either -- same shared hs_control_* block. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_radio_button_create(HsRect frame, string name,
+			string label, uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_radio_button_destroy(IntPtr radioButton);
+
+		[DllImport(Lib)]
+		internal static extern void hs_radio_button_set_click_callback(IntPtr radioButton,
+			RadioButtonClickCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_radio_button_set_destroyed_callback(IntPtr radioButton,
+			RadioButtonDestroyedCallback callback, IntPtr userData);
 	}
 }
