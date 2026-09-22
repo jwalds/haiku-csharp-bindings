@@ -115,6 +115,19 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void SliderDestroyedCallback(IntPtr userData);
 
+	/* ListView delegate shapes matching hs_list_view.h's callback
+	 * typedefs exactly. No BMessage/BInvoker/target involved in either
+	 * -- see hs_list_view.h's own note on why SelectionChanged()/
+	 * Invoke() are overridden as direct callbacks instead. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ListViewSelectionChangedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ListViewInvokedCallback(IntPtr userData);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ListViewDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -644,5 +657,71 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern uint hs_color_control_layout(IntPtr colorControl);
+
+		/* Raw P/Invoke surface for hs_list_view.h. ListView.cs wraps
+		 * every one of these in a safe, idiomatic method/property. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_list_view_create(HsRect frame, string name,
+			uint listType, uint resizingMode, uint flags);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_destroy(IntPtr listView);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_set_selection_changed_callback(IntPtr listView,
+			ListViewSelectionChangedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_set_invoked_callback(IntPtr listView,
+			ListViewInvokedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_set_destroyed_callback(IntPtr listView,
+			ListViewDestroyedCallback callback, IntPtr userData);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_add_item(IntPtr listView, string text);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_add_item_at(IntPtr listView, string text, int index);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_list_view_remove_item_at(IntPtr listView, int index);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_make_empty(IntPtr listView);
+
+		[DllImport(Lib)]
+		internal static extern int hs_list_view_count_items(IntPtr listView);
+
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_list_view_item_text(IntPtr listView, int index);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_set_item_text(IntPtr listView, int index, string text);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_select(IntPtr listView, int index,
+			[MarshalAs(UnmanagedType.I1)] bool extend);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_deselect(IntPtr listView, int index);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_deselect_all(IntPtr listView);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_list_view_is_item_selected(IntPtr listView, int index);
+
+		[DllImport(Lib)]
+		internal static extern int hs_list_view_current_selection(IntPtr listView, int selectionIndex);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_set_list_type(IntPtr listView, uint type);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_list_view_list_type(IntPtr listView);
 	}
 }

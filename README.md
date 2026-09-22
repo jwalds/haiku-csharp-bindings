@@ -85,9 +85,9 @@ reply plumbing (`SendReply`, `WasDelivered`, etc. -- these belong more with
 sugar and indexed (multiple-values-per-name) overloads real `BMessage` also
 has.
 
-### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton/Slider/ColorControl)
+### Interface Kit (BWindow, BView's "shell + drawing + basic input" slices, and Button/Control/TextControl/CheckBox/RadioButton/Slider/ColorControl/ListView)
 
-Ten slices so far: `BWindow` (the first), a second, deliberately
+Eleven slices so far: `BWindow` (the first), a second, deliberately
 scoped-down slice of `BView` -- construction/geometry, being added to and
 removed from a window's view hierarchy, the `AttachedToWindow`/
 `DetachedFromWindow`/`Draw` hooks, and enough drawing primitives to prove
@@ -141,7 +141,21 @@ and cell size, and its `Label` is applied by `ColorControl.cs` itself
 after construction rather than by the native constructor, which has no
 label parameter at all (see "ColorControl" below for both hardware-
 verified facts, plus a sixth confirmed `BApplication`-at-construction
-requirement). `GetMouse()` polling, drag & drop, layout/`FrameResized`/
+requirement) -- and an eleventh: `ListView`, this binding's first widget
+that is not a `BControl` at all (real `BListView` is `class BListView :
+public BView, public BInvoker`, multiple inheritance this binding had
+never wrapped before), with text items backed by `BStringItem` (add/
+insert/remove/read/replace, all indexed rather than exposed as their own
+handles), single- and multi-selection, and two direct hooks --
+`OnSelectionChanged` (confirmed on hardware to fire for a plain
+programmatic `Select()`/`Deselect()` call, not just a real click) and
+`OnInvoked` (double-click, or Enter/Return with a row focused) -- in
+place of BeAPI's own `BMessage`/`BInvoker` plumbing (see "ListView"
+below for the ABI-offset fact this required re-verifying under multiple
+inheritance, a genuine `BListItem`-ownership leak in real BeAPI this
+binding's shim closes, and a widget that -- unlike every other one added
+since `TextControl` -- needs no live `BApplication` to construct at
+all). `GetMouse()` polling, drag & drop, layout/`FrameResized`/
 `FrameMoved`, and every other `BControl`-derived widget (`BPictureButton`,
 `BOptionPopUp`, `BChannelSlider`, ...) are deferred to a follow-up slice
 -- see "Not yet covered" below. This kit lives in its own
@@ -300,6 +314,26 @@ future kits (Storage, etc.) to also get their own assembly.
   enum (`B_CELLS_4x64`=4/`B_CELLS_8x32`=8/`B_CELLS_16x16`=16/
   `B_CELLS_32x8`=32/`B_CELLS_64x4`=64), plain non-sequential values,
   verified against the actual installed `ColorControl.h`.
+- `Haiku.Interface.ListView` -- wraps a native `BListView` subclass
+  (`HSListView`, in `native/`), deriving from `ViewBase` directly (NOT
+  `Control` -- real `BListView` is not a `BControl` -- and NOT `View`
+  either, same reasoning as `Control`'s own: the native shim never wires
+  up `Draw`/mouse/key callbacks against an `HSListView` handle). Text-only
+  items, indexed rather than exposed as their own handles: `AddItem`
+  (append or insert-at-index), `RemoveItemAt`, `MakeEmpty`, `CountItems`,
+  `ItemTextAt`/`SetItemTextAt`, `Select`/`Deselect`/`DeselectAll`/
+  `IsItemSelected`/`CurrentSelection`, `ListType`, and two direct hooks --
+  `OnSelectionChanged` and `OnInvoked` -- with no `BMessage`/`BInvoker`/
+  target plumbing. See "ListView" below before touching `ListView.cs` or
+  `hs_list_view.cpp` -- in particular, unlike every widget added since
+  `TextControl`, constructing one does NOT need a live `BApplication`
+  (though every test in `ListViewTests.cs` still opens one anyway, for a
+  suite-ordering reason `CheckBoxTests.cs` already documented for its own
+  widget -- see "Testing" below).
+- `Haiku.Interface.ListViewType` -- Haiku's `list_view_type` enum
+  (`B_SINGLE_SELECTION_LIST`=0/`B_MULTIPLE_SELECTION_LIST`=1), a plain
+  unvalued C++ enum, so these values are guaranteed by the language
+  itself, not merely likely to match.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
 identification, `FrameResized`/`FrameMoved`, layout, scrolling, fonts
@@ -311,7 +345,7 @@ DRAWING note), `AddChild`'s `before` (insert position) parameter, any
 `BChannelSlider`, ...) -- `BStatusBar`, despite being an easy widget to
 lump in with these by name, actually derives from `BView` directly, not
 `BControl` (confirmed by reading the actual installed header, not
-assumed); it belongs with `BMenuField`/`BListView`/`BScrollBar` as a
+assumed); it belongs with `BMenuField`/`BScrollBar` as a
 separate, not-yet-covered `BView`-derived widget instead --
 `TextControl`'s own `Divider`/`Alignment` and the underlying `BTextView`
 it wraps (see "TextControl" below for that scope decision), `Slider`'s
@@ -330,12 +364,20 @@ out of scope everywhere else too), and its own raw drawing internals
 "ColorControl" below), and any real `BMessage`/`BInvoker`/target-based invocation
 (`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/`OnTextCommitted`,
 `CheckBox`'s/`RadioButton`'s own `OnClick`, `Slider`'s
-`OnValueChanged`/`OnValueCommitted`, and `ColorControl`'s
-`OnColorChanged` are all direct callbacks instead -- see "Button/Control",
-"TextControl", "CheckBox/RadioButton", "Slider", and "ColorControl"
+`OnValueChanged`/`OnValueCommitted`, `ColorControl`'s
+`OnColorChanged`, and `ListView`'s `OnSelectionChanged`/`OnInvoked` are
+all direct callbacks instead -- see "Button/Control", "TextControl",
+"CheckBox/RadioButton", "Slider", "ColorControl", and "ListView"
 below) -- deliberately deferred to a follow-up slice rather than folded
-into this one. Also not yet covered: everything else in
-Interface Kit (~50 other classes), `BScreen`, `BDirectWindow`.
+into this one. Also, specific to `ListView`: custom `BListItem`
+subclasses (anything beyond plain text), `BOutlineListView`, drag-and-
+drop reordering (`InitiateDrag`), `SortItems`/`SwapItems`/`MoveItem`/
+`ReplaceItem`/`AddList`, `ItemFrame`/`DoForEach`, and wrapping in a
+`BScrollView` (a plain `BListView` still works and scrolls its selection
+into view internally via `ScrollToSelection()`, it just has no visible
+scrollbar without one) -- see "ListView" below. Also not yet covered:
+everything else in Interface Kit (~50 other classes), `BScreen`,
+`BDirectWindow`.
 
 ## The open question this slice exists to answer
 
@@ -1167,6 +1209,101 @@ size) was confirmed rendering correctly -- the RGB ramps, selectors, and
 numeric Red/Green/Blue fields all fully visible with no clipping -- via a
 real screenshot on the Haiku box.
 
+## ListView: not a BControl at all, no BApplication required, and a real BListItem ownership leak this binding's shim closes
+
+`ListView` is this binding's eleventh Interface Kit slice, and the first
+widget that isn't a `BControl` at all. Real `BListView` is `class
+BListView : public BView, public BInvoker` -- multiple inheritance this
+binding had never wrapped before. A probe confirmed `BView` is still the
+first base and still sits at offset 0 (casting a live list view to
+`BView*` produced the identical pointer value, and `Frame()` read through
+either path matched exactly), so `hs_view_get_frame()`/`move_to()`/
+`resize_to()`/`add_child()`/`remove_child()` are reused unchanged, same
+as every other widget -- but this shim never blind-casts to `BInvoker*`,
+and never needs to, since `SelectionChanged()`/`Invoke()` are reached
+through `HSListView`'s own real vtable, not a generic cast.
+
+**No live `BApplication` required to construct -- the second widget, not
+the ninth, to have this exception.** A probe confirmed a `BListView`
+constructs and deletes cleanly with none, matching `CheckBox`'s own
+exception rather than `TextControl`/`RadioButton`/`Slider`/`ColorControl`'s
+hard requirement. `ListViewTests.cs` still wraps every test in a `using
+(new Application(...))` anyway, for the exact suite-ordering reason
+`CheckBoxTests.cs` already documented in detail for its own widget: by
+the time `BListView`'s tests run inside the shared `Tests.exe` process,
+several earlier modules have already constructed and disposed
+`Application`s of their own, and once any `BApplication` has ever existed
+in the process, a later `BApplication`-less construction can hang the
+same way a hard requirement would.
+
+**Real BeAPI never deletes a `BListItem` it stops referencing -- this
+shim does, since it's the only thing that ever creates one.** A hardware
+probe with an instrumented `BStringItem` subclass (its destructor printed
+when it actually ran) confirmed that `RemoveItem(int32)`, `MakeEmpty()`,
+and even `~BListView()` itself all leave every item's memory to the
+caller -- a genuine, verified leak in real BeAPI if nothing else tracks
+and deletes those items. Since this shim is the only thing that ever
+calls `new BStringItem(...)` for a list it created, and never lets a raw
+`BListItem*` escape to managed code, it safely takes on the ownership
+real BeAPI declines: `hs_list_view_remove_item_at()` deletes the item
+after removing it, `hs_list_view_make_empty()` deletes every item before
+clearing the list, and `HSListView`'s own destructor deletes whatever
+items remain before `~BListView()` runs.
+
+**Two direct hooks, matching `TextControl`/`Slider`'s two-hook shape, not
+`Button`/`ColorControl`'s one.** `OnSelectionChanged` fires whenever the
+current selection changes, and a probe confirmed it fires correctly for a
+plain programmatic `Select()`/`Select(..., extend: true)`/`DeselectAll()`
+call, not merely a real click -- unlike every other widget's own
+click/invoke hook in this binding, this one really is exercised
+end-to-end by `ListViewTests.cs`'s `SelectionChangedFiresOnProgrammaticSelect`,
+not just verified visually. `OnInvoked` fires on double-click, or
+Enter/Return while a row has keyboard focus (real BeAPI's own
+`Invoke()`) -- like every other widget's click/invoke hook, there's no
+supported way to synthesize that one programmatically, so it's verified
+visually instead, via `Sample.exe`'s `DemoListView`.
+
+**Text-only items, no item handles -- a deliberate scope decision.**
+Every item is a plain string, addressed by its index, backed by a
+`BStringItem` this shim creates and owns internally (see the ownership
+note above) -- there is no managed `ListItem` class and no way to plug in
+custom drawing. `ListType` (`ListViewType.SingleSelection`/
+`MultipleSelection`) is a plain round-trip, and
+`CurrentSelection(selectionIndex)` already covers both list types the
+same way real BeAPI's own method does, so this shim needed no extra
+surface to support multi-selection once single-selection worked.
+
+**Scope.** Add/insert/remove/read/replace text items, `CountItems`,
+`ListType`, single- and multi-selection, and the `OnSelectionChanged`/
+`OnInvoked` hook pair, plus the inherited `Frame`/`MoveTo`/`ResizeTo`/
+`AddChild`/`RemoveChild` via `ViewBase` -- custom `BListItem` subclasses,
+`BOutlineListView`, drag-and-drop reordering (`InitiateDrag`),
+`SortItems`/`SwapItems`/`MoveItem`/`ReplaceItem`/`AddList`, `ItemFrame`/
+`DoForEach`, the `BMessage`-based constructor/`Archive()`/`Instantiate()`
+(`BArchivable` persistence is out of scope everywhere in this binding),
+and wrapping in a `BScrollView` (a plain `BListView` still works and
+scrolls its selection into view internally, it just has no visible
+scrollbar without one) are real `BListView`/`BListItem` API this binding
+does not expose, a deliberate scope decision (captured in
+`hs_list_view.h`'s own header comment), not an oversight.
+
+**Verification.** `ListViewTests.cs` (module `BListView`, 15 tests)
+covers construction/geometry, item add/insert/remove/text
+round-tripping, single- and multi-selection semantics (including
+`CurrentSelection` returning -1 once past the number of selected rows),
+`ListType` round-tripping, `SelectionChangedFiresOnProgrammaticSelect`
+(the one input hook in this binding that actually is exercised
+end-to-end, not just visually -- see above), and the same `AddChild`/
+`RemoveChild`/`Dispose()`-while-attached/cascade-on-destroy ownership
+rules every other widget in this binding covers, including a cascade
+test that leaves an item in the list to confirm `HSListView`'s own
+destructor cleans it up rather than leaking it. `OnInvoked` is not
+attempted automatically, same reasoning as every other input hook in
+this binding -- real event-firing is verified visually instead:
+`Sample.exe`'s `DemoListView` (four items, "Alpha" selected by default)
+was confirmed rendering correctly -- all four rows fully visible with no
+clipping -- via a real screenshot on the Haiku box.
+
 ## Building and running (on Haiku)
 
 Needs `g++` (or another Haiku-supported C++ compiler), the Mono 6.14.1 port
@@ -1215,19 +1352,23 @@ others with no grouping code anywhere in this binding (see
 "Quiet"/"Loud" limit labels) beneath that, logging every drag tick and
 every committed value (see "Slider" above) -- and, beneath that, a real
 `DemoColorControl` ("Color:", a 32x8 grid with a 6px cell size) logging
-every color pick (see "ColorControl" above) -- and waits for you to close
-it (its title bar's close box), at which point
+every color pick (see "ColorControl" above) -- and, beneath that, a real
+`DemoListView` (four items -- "Alpha"/"Beta"/"Gamma"/"Delta", with
+"Alpha" selected by default) logging every selection change and every
+double-click/Enter invocation (see "ListView" above) -- and waits for you
+to close it (its title bar's close box), at which point
 `WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
 too.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels, and the DemoColorControl "Color:" grid with its RGB ramps and numeric fields](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels, and the DemoColorControl "Color:" grid with its RGB ramps and numeric fields, and the DemoListView showing its four items with
+"Alpha" selected](screenshots/sample-demo.png)
 
 Expected output:
 
 ```
 [1] OnReadyToRun fired -- creating and showing the demo window.
 [2] DemoView attached to its window.
-[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, or close it (its title bar's close box) to quit.
+[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, pick an item from the list, or close it (its title bar's close box) to quit.
 [3] DemoView.OnDraw fired, updateRect=(0, 0, 360, 190)
 [5] Application OnQuitRequested fired -- allowing shutdown.
 App exited cleanly.
@@ -1293,6 +1434,18 @@ line with whatever color was actually picked -- the actual verification
 for `OnColorChanged`, since (per "ColorControl" above) there's no
 automated or synthetic way to fire a real palette/ramp click either.
 
+Clicking an item in the list prints a `[13] DemoListView selection
+changed, now: "Beta" (index 1)` line (or similar) -- this one IS also
+covered by an automated test (`SelectionChangedFiresOnProgrammaticSelect`,
+see "ListView" above), since a probe confirmed `OnSelectionChanged` fires
+for a plain programmatic `Select()` call too, unlike every other input
+hook in this file. Double-clicking an item (or pressing Enter/Return
+while one has keyboard focus) additionally prints a single `[13]
+DemoListView invoked (double-click or Enter) on: "Beta" (index 1)` line
+-- THAT part is the actual verification for `OnInvoked`, since (per
+"ListView" above) there's no automated or synthetic way to fire a real
+double-click either.
+
 (`[4]`, printed from `DemoWindow.OnDestroyed()`, only appears if the window
 itself gets torn down as part of that shutdown -- which happens when you
 close it via its own close box, but not necessarily if the application is
@@ -1356,6 +1509,11 @@ left on screen BEFORE that test runs, with its result appended once known:
   LabelRoundTrips ... PASS
   ...
 
+== BListView ==
+  ConstructionAndGeometryRoundTrip ... PASS
+  AddItemAppendsAndInsertsCorrectly ... PASS
+  ...
+
 == BMessage ==
   Int8RoundTrips ... PASS
   Int16RoundTrips ... PASS
@@ -1392,7 +1550,7 @@ left on screen BEFORE that test runs, with its result appended once known:
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-134 passed, 0 failed, 0 errored
+149 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -1413,7 +1571,7 @@ rather than silence until it either finishes or you give up waiting.
 
 Pass a substring to run just one module, matched against either the
 `[TestModule]` name or the bare class name -- `mono Tests.exe BMessage` and
-`mono Tests.exe Message` both run only `MessageTests`. Eleven modules exist
+`mono Tests.exe Message` both run only `MessageTests`. Twelve modules exist
 today:
 
 - `BMessage` (class `MessageTests`) -- one small, fast, isolated test per
@@ -1474,6 +1632,23 @@ today:
   include a test that actually fires `OnColorChanged` -- read
   `managed/Tests/ColorControlTests.cs`'s own class remarks and
   "ColorControl" above before trying to add one.
+- `BListView` (class `ListViewTests`, 15 tests) -- construction/geometry,
+  item add/insert/remove/text round-tripping, single- and
+  multi-selection semantics (including `CurrentSelection` returning -1
+  once past the number of selected rows), `ListType` round-tripping,
+  `SelectionChangedFiresOnProgrammaticSelect` (confirmed on hardware
+  that `OnSelectionChanged` fires for a plain programmatic call, not
+  just a real click -- see "ListView" above), and the same ownership
+  rules every other module covers, including a cascade-destroy test
+  that leaves an item in the list to confirm `HSListView`'s own
+  destructor cleans it up rather than leaking it (see "ListView" above
+  for the real BeAPI leak this closes). UNLIKE every widget added since
+  `TextControl`, real `BListView` needs no live `BApplication` to
+  construct at all -- but every test here still opens one anyway, for
+  the same suite-ordering reason `CheckBoxTests.cs` already documented
+  for its own widget (see "ListView" above and
+  `managed/Tests/ListViewTests.cs`'s own class remarks). Deliberately
+  does NOT include a test that actually fires `OnInvoked`.
 - `BRadioButton` (class `RadioButtonTests`) -- construction/geometry,
   `Label`/`Value`/`IsChecked`/`IsEnabled` round-tripping, and the same
   ownership rules `BButton`/`BCheckBox` cover, PLUS

@@ -473,10 +473,60 @@ public class DemoColorControl : ColorControl
 	}
 }
 
+/*
+ * A real BListView, demonstrating this binding's eleventh Interface Kit
+ * slice and its first widget that isn't a BControl at all -- real
+ * BListView is `class BListView : public BView, public BInvoker`, not a
+ * BControl subclass (see hs_list_view.h's own ABI note on verifying
+ * BView still sits at offset 0 under that multiple inheritance).
+ * Demonstrates text items (add/insert/remove/read), selection, and the
+ * two distinct callbacks -- OnSelectionChanged (fires whenever the
+ * current selection changes -- confirmed on hardware to fire even for a
+ * plain programmatic call, not just a real click) and OnInvoked (fires
+ * on double-click, or Enter/Return while a row has keyboard focus).
+ *
+ * Unlike every other widget in this file, constructing a BListView does
+ * NOT require a live BApplication -- see hs_list_view.h's own note,
+ * matching DemoCheckBox's exception rather than DemoTextControl/
+ * DemoRadioButton/DemoSlider/DemoColorControl's hard requirement -- but
+ * it's still constructed here inside DemoWindow's constructor, alongside
+ * everything else, purely for consistency.
+ *
+ * No BScrollView wraps this list (out of scope -- see hs_list_view.h's
+ * SCOPE note), so its frame is sized to show every row without clipping
+ * rather than to demonstrate scrolling.
+ */
+public class DemoListView : ListView
+{
+	public DemoListView()
+		: base(new Rect(20, 600, 380, 700), "demo list view")
+	{
+		AddItem("Alpha");
+		AddItem("Beta");
+		AddItem("Gamma");
+		AddItem("Delta");
+		Select(0);
+	}
+
+	protected override void OnSelectionChanged()
+	{
+		int selected = CurrentSelection();
+		Console.WriteLine("[13] DemoListView selection changed, now: " +
+			(selected < 0 ? "(none)" : "\"" + ItemTextAt(selected) + "\" (index " + selected + ")"));
+	}
+
+	protected override void OnInvoked()
+	{
+		int selected = CurrentSelection();
+		Console.WriteLine("[13] DemoListView invoked (double-click or Enter) on: " +
+			(selected < 0 ? "(none)" : "\"" + ItemTextAt(selected) + "\" (index " + selected + ")"));
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 680), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 820), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
@@ -495,6 +545,7 @@ public class DemoWindow : Window
 
 		AddChild(new DemoSlider());
 		AddChild(new DemoColorControl());
+		AddChild(new DemoListView());
 	}
 
 	protected override void OnDestroyed()
@@ -514,7 +565,7 @@ public class DemoApplication : Application
 		Console.WriteLine("[1] OnReadyToRun fired -- creating and showing the demo window.");
 		DemoWindow window = new DemoWindow();
 		window.Show();
-		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, or close it (its title bar's close box) to quit.");
+		Console.WriteLine("[2b] Window shown -- move/click the mouse over it, type, click the button, type into the text field, toggle the checkbox, pick a radio button, drag the slider, pick a color, pick an item from the list, or close it (its title bar's close box) to quit.");
 	}
 
 	protected override bool OnQuitRequested()
