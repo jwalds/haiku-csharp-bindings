@@ -249,15 +249,25 @@ future kits (Storage, etc.) to also get their own assembly.
   `SetLimitLabels`), `KeyIncrementValue`, and `OnValueChanged` (fires
   repeatedly while the thumb is being dragged) / `OnValueCommitted`
   (fires once, on mouse-up) -- both direct hooks, no `BMessage`/target
-  involved. See "Slider" below before touching `Slider.cs`, `Control.cs`,
-  or `hs_slider.cpp` -- in particular, constructing one before a
-  `BApplication` exists in the process hangs forever, same as
-  `TextControl`/`RadioButton`.
+  involved -- plus, from the later completeness pass, `SnoozeAmount`,
+  `HashMarkCount`, `HashMarks` (a `HashMarkLocation`), `BarColor`,
+  `UsesFillColor`/`FillColor`/`SetFillColor(bool, RgbColor)`, and
+  `BarThickness`. See "Slider" below before touching `Slider.cs`,
+  `Control.cs`, or `hs_slider.cpp` -- in particular, constructing one
+  before a `BApplication` exists in the process hangs forever, same as
+  `TextControl`/`RadioButton`, and two of the completeness-pass members
+  (`FillColor` after disabling it, and `BarThickness`'s rounding) have
+  hardware-verified quirks documented on the properties themselves, not
+  just in "Slider" below.
 - `Haiku.Interface.SliderOrientation` -- Haiku's `orientation` enum
   (`B_HORIZONTAL`/`B_VERTICAL`), a plain sequential enum (0/1), verified
   against the actual installed `InterfaceDefs.h`.
 - `Haiku.Interface.ThumbStyle` -- Haiku's `thumb_style` enum
   (`B_BLOCK_THUMB`/`B_TRIANGLE_THUMB`), a plain sequential enum (0/1),
+  verified against the actual installed `Slider.h`.
+- `Haiku.Interface.HashMarkLocation` -- Haiku's `hash_mark_location` enum
+  (`B_HASH_MARKS_NONE`/`TOP`/`BOTTOM`/`BOTH`, plus `LEFT`/`RIGHT` as
+  hardware-verified aliases of `TOP`/`BOTTOM` -- see "Slider" below),
   verified against the actual installed `Slider.h`.
 
 Not yet covered: `GetMouse()` polling, drag & drop, function-key
@@ -266,12 +276,21 @@ beyond the current default, custom drawing patterns (`FillRect`/
 `StrokeRect`/`StrokeLine` always use `B_SOLID_HIGH`; see `hs_view.h`'s
 DRAWING note), `AddChild`'s `before` (insert position) parameter, any
 `BControl`-derived widget other than `Button`/`TextControl`/`CheckBox`/
-`RadioButton`/`Slider` (`BColorControl`, `BPictureButton`, `BStatusBar`,
-...), `TextControl`'s own `Divider`/`Alignment` and the underlying
-`BTextView` it wraps (see "TextControl" below for that scope decision),
-`Slider`'s own hash marks/tick marks, bar/fill colors, a custom icon, the
-snooze amount, and `UpdateText()` (see "Slider" below for that scope
-decision), and any real `BMessage`/`BInvoker`/target-based invocation
+`RadioButton`/`Slider` (`BColorControl`, `BPictureButton`, `BOptionPopUp`,
+`BChannelSlider`, ...) -- `BStatusBar`, despite being an easy widget to
+lump in with these by name, actually derives from `BView` directly, not
+`BControl` (confirmed by reading the actual installed header, not
+assumed); it belongs with `BMenuField`/`BListView`/`BScrollBar` as a
+separate, not-yet-covered `BView`-derived widget instead --
+`TextControl`'s own `Divider`/`Alignment` and the underlying `BTextView`
+it wraps (see "TextControl" below for that scope decision), `Slider`'s
+own custom icon (`SetIcon`, needs a `BBitmap` binding this project
+doesn't have), custom font (`SetFont`, needs a `BFont` binding this
+project doesn't have), `UpdateText()`/`UpdateTextChanged()` (a virtual
+override needing native-owned per-call string lifetime management),
+`ValueForPoint()`, and the raw drawing internals (`DrawSlider`/`DrawBar`/
+`DrawHashMarks`/`DrawThumb`/`DrawFocusMark`/`DrawText`/etc. -- see "Slider"
+below for that scope decision), and any real `BMessage`/`BInvoker`/target-based invocation
 (`Button`'s `OnClick`, `TextControl`'s `OnTextChanged`/`OnTextCommitted`,
 `CheckBox`'s/`RadioButton`'s own `OnClick`, and `Slider`'s
 `OnValueChanged`/`OnValueCommitted` are all direct callbacks instead --
@@ -925,29 +944,97 @@ comes back as `Position() == 0.5` exactly, both before and after
 specific, hardware-confirmed-exact values rather than an arbitrary
 interior position that could be quantized differently.
 
-**Scope.** `Position`/`Minimum`-`Maximum` (via `SetLimits`)/
-`Orientation`/`Style`/limit labels (via `SetLimitLabels`)/
+**Scope, as originally shipped.** `Position`/`Minimum`-`Maximum` (via
+`SetLimits`)/`Orientation`/`Style`/limit labels (via `SetLimitLabels`)/
 `KeyIncrementValue`, plus the shared `Label`/`Value`/`IsEnabled` via
 `Control` -- hash marks/tick marks, bar/fill colors, a custom icon, the
-snooze amount, and `UpdateText()` are real `BSlider` API this binding
-does not expose yet, a deliberate scope decision (captured in
-`hs_slider.h`'s own header comment), not an oversight.
+snooze amount, and `UpdateText()` were real `BSlider` API this binding
+did not expose yet, a deliberate scope decision (captured in
+`hs_slider.h`'s own header comment at the time), not an oversight.
 
-**Verification.** `SliderTests.cs` (module `BSlider`) covers
+### Completeness pass: hash marks, bar/fill colors, snooze amount, bar thickness
+
+A later pass closed most of that gap, addressing everything `hs_slider.h`'s
+own original SCOPE note had named as deferred except what still needs
+infrastructure this binding doesn't have (a `BBitmap` binding for
+`SetIcon`, a `BFont` binding for `SetFont`) or was judged out of scope for
+a different reason (`UpdateText()`/`UpdateTextChanged()` need native-owned
+per-call string lifetime management for a *virtual override*, riskier than
+a plain getter/setter; `ValueForPoint()` and the raw `Draw*`/`*Frame`
+internals are withheld from every `BControl` subclass in this binding, not
+just `Slider`). `SnoozeAmount`, `HashMarkCount`, `HashMarks` (a new
+`HashMarkLocation` enum), `BarColor`, `UsesFillColor`/`FillColor`/
+`SetFillColor(bool, RgbColor)`, and `BarThickness` were added instead,
+every one of them hardware-verified before any shim code relied on it, per
+this binding's standing rule.
+
+**`HashMarkLocation` reuses real BeAPI's own aliasing rather than picking
+one name per value.** Real `hash_mark_location` has `B_HASH_MARKS_TOP ==
+B_HASH_MARKS_LEFT == 1` and `B_HASH_MARKS_BOTTOM == B_HASH_MARKS_RIGHT ==
+2` -- the same numbers reused for a horizontal slider's "above/below" and
+a vertical slider's "left/right" hash marks. C# allows multiple enum
+members to share one underlying value, so the managed enum mirrors this
+exactly (confirmed on hardware: setting `Top` and reading back compares
+equal to `Left`) instead of arbitrarily choosing only the horizontal or
+only the vertical names.
+
+**Two genuinely inconsistent hardware findings, documented rather than
+chased to a root cause -- same practice as the `BApplication` asymmetry
+in "CheckBox/RadioButton" above.** First: `FillColor()`'s value after a
+*disabling* `UseFillColor(false, ...)` call is not reliably predictable
+from the color passed to that call -- a dedicated three-scenario probe
+found it sometimes zeroed and sometimes kept the previously enabled color,
+with no single hypothesis explaining all three. `FillColor` is documented
+as meaningful only while `UsesFillColor` is `true`, and
+`FillColorEnablingRoundTrips` never asserts a specific `FillColor` value
+after a disabling call, only that `UsesFillColor` itself correctly becomes
+`false` (the reliable half of the behavior). Second, cleaner: `BarThickness`
+rounds its argument to the nearest integer pixel (ties round up -- `12.5`
+reads back as `13.0`) and clamps to a minimum of `1.0` (`0.0` reads back as
+`1.0`) -- confirmed with an 8-value probe before `BarThicknessRoundTrips`
+asserted anything, so it only checks those specific hardware-confirmed
+values rather than a general, unverified rounding rule.
+
+**Colors cross the P/Invoke boundary as four raw bytes, not a struct --
+the same convention `hs_view.h`'s `SetHighColor`/`SetLowColor`/
+`SetViewColor` already established**, reused here rather than introducing
+a second, competing color-marshaling convention alongside `hs_types.h`'s
+`hs_rgb_color` (which stays reserved for `BMessage`'s `AddColor`/
+`FindColor`). `FillColor(NULL)` is confirmed null-safe on hardware, which
+`hs_slider_uses_fill_color()` relies on to read just the boolean without a
+throwaway color buffer; `FillColor(&out)` before `UseFillColor` has ever
+been called returns uninitialized garbage bytes (observed `(7,8,0,0)` on
+hardware), which is why managed code must not read `FillColor` before
+`SetFillColor` has been called at least once.
+
+**Scope, updated.** Everything above, plus everything from the original
+scope paragraph. `SetIcon`, `SetFont`, `UpdateText()`/
+`UpdateTextChanged()`, `ValueForPoint()`, and the raw drawing internals
+remain deliberately unexposed -- see `hs_slider.h`'s own updated SCOPE
+note for the full reasoning behind each.
+
+**Verification.** `SliderTests.cs` (module `BSlider`, 23 tests) covers
 construction/geometry, `Label`/`IsEnabled` (re-verified against this
 fifth concrete control type), `Minimum`/`Maximum` round-tripping via
 `SetLimits`, the `Position`/`Value` relationship described above,
 `Orientation`/`Style` round-tripping (including both constructor
 overloads), limit-label round-tripping, `KeyIncrementValue`
-round-tripping, and the same `AddChild`/`RemoveChild`/
-`Dispose()`-while-attached/cascade-on-destroy ownership rules every
-other widget in this binding covers. It deliberately does not attempt to
-fire `OnValueChanged`/`OnValueCommitted` automatically, same reasoning as
-every other input hook in this binding. Real event-firing is verified
-visually instead: `Sample.exe`'s `DemoSlider` ("Volume:", with "Quiet"/
-"Loud" limit labels) was confirmed rendering correctly -- track, thumb,
-and both limit labels fully visible with no clipping -- via a real
-screenshot on the Haiku box.
+round-tripping, the completeness-pass round-trip tests described above
+(`SnoozeAmountRoundTrips`, `HashMarkCountRoundTrips`,
+`HashMarksRoundTrips`, `BarColorRoundTrips`,
+`FillColorEnablingRoundTrips`, `BarThicknessRoundTrips`), and the same
+`AddChild`/`RemoveChild`/`Dispose()`-while-attached/cascade-on-destroy
+ownership rules every other widget in this binding covers. It
+deliberately does not attempt to fire `OnValueChanged`/`OnValueCommitted`
+automatically, same reasoning as every other input hook in this binding.
+Real event-firing, and the two cosmetic completeness-pass additions that
+have no automated assertion of their own (`BarColor`/hash marks are
+purely visual), are verified visually instead: `Sample.exe`'s
+`DemoSlider` ("Volume:", with "Quiet"/"Loud" limit labels, a custom
+steel-blue `BarColor`, and ten hash-mark divisions on both sides of the
+bar) was confirmed rendering correctly -- track, thumb, hash marks, and
+both limit labels fully visible with no clipping -- via a real screenshot
+on the Haiku box.
 
 ## Building and running (on Haiku)
 
@@ -1000,7 +1087,7 @@ it (its title bar's close box), at which point
 `WindowFlags.QuitOnWindowClose` signals the owning `BApplication` to quit
 too.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", and the DemoSlider "Volume:" control with its "Quiet"/"Loud" limit labels](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", and the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels](screenshots/sample-demo.png)
 
 Expected output:
 
@@ -1161,7 +1248,7 @@ left on screen BEFORE that test runs, with its result appended once known:
 == Application Kit ==
   ReadyToRunMessageAndQuitRequestedAllFireInOrder ... PASS
 
-115 passed, 0 failed, 0 errored
+121 passed, 0 failed, 0 errored
 ```
 
 That ordering is deliberate, and no longer just a convenience: test
@@ -1238,19 +1325,24 @@ today:
   load-bearing, not stylistic: constructing a `BRadioButton` with no
   `BApplication` yet in the process hangs forever, unlike `BCheckBox`.
   Deliberately does NOT include a test that actually fires `OnClick`.
-- `BSlider` (class `SliderTests`) -- construction/geometry, `Label`/
-  `IsEnabled` round-tripping (re-verified against this fifth concrete
-  control type), `Minimum`/`Maximum` round-tripping via `SetLimits`, the
-  hardware-verified `Position`/`Value` relationship (see "Slider" above
-  for why only exact, verified values are asserted), `Orientation`/
-  `Style` round-tripping (including both constructor overloads),
-  limit-label round-tripping, `KeyIncrementValue` round-tripping, and the
-  same ownership rules every other module covers. Like
-  `TextControlTests`/`RadioButtonTests`, EVERY test here opens an
-  `Application` first -- load-bearing, not stylistic: constructing a
-  `BSlider` with no `BApplication` yet in the process hangs forever (see
-  "Slider" above). Deliberately does NOT include a test that actually
-  fires `OnValueChanged`/`OnValueCommitted` -- read
+- `BSlider` (class `SliderTests`, 23 tests) -- construction/geometry,
+  `Label`/`IsEnabled` round-tripping (re-verified against this fifth
+  concrete control type), `Minimum`/`Maximum` round-tripping via
+  `SetLimits`, the hardware-verified `Position`/`Value` relationship (see
+  "Slider" above for why only exact, verified values are asserted),
+  `Orientation`/`Style` round-tripping (including both constructor
+  overloads), limit-label round-tripping, `KeyIncrementValue`
+  round-tripping, the completeness-pass additions
+  (`SnoozeAmountRoundTrips`, `HashMarkCountRoundTrips`,
+  `HashMarksRoundTrips` including the `Top`/`Left` aliasing,
+  `BarColorRoundTrips`, `FillColorEnablingRoundTrips` -- deliberately
+  never asserting `FillColor` after a disabling call, see "Slider" above
+  -- and `BarThicknessRoundTrips`), and the same ownership rules every
+  other module covers. Like `TextControlTests`/`RadioButtonTests`, EVERY
+  test here opens an `Application` first -- load-bearing, not stylistic:
+  constructing a `BSlider` with no `BApplication` yet in the process
+  hangs forever (see "Slider" above). Deliberately does NOT include a
+  test that actually fires `OnValueChanged`/`OnValueCommitted` -- read
   `managed/Tests/SliderTests.cs`'s own class remarks and "Slider" above
   before trying to add one.
 - `BTextControl` (class `TextControlTests`) -- construction/geometry

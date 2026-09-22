@@ -278,6 +278,132 @@ public class SliderTests
 		}
 	}
 
+	/* COMPLETENESS PASS ADDITIONS BELOW -- covers every property added in
+	 * that pass. See Slider.cs's own doc comments (and hs_slider.h's
+	 * updated SCOPE note) for the two genuine hardware-verified surprises
+	 * these tests deliberately do NOT over-assert: FillColor's value
+	 * after a disabling SetFillColor(false, ...) call, and the exact
+	 * rounding rule BarThickness applies beyond the specific values a
+	 * native probe actually confirmed. */
+
+	[Test]
+	public void SnoozeAmountRoundTrips()
+	{
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "snooze probe", "Label:", 0, 100);
+
+			// Hardware-verified default -- see Slider.cs's own doc comment.
+			Assert.AreEqual(20000, slider.SnoozeAmount, "SnoozeAmount should default to 20000 microseconds, matching real BeAPI's own constructor default");
+
+			slider.SnoozeAmount = 50000;
+			Assert.AreEqual(50000, slider.SnoozeAmount, "SnoozeAmount should read back what the property setter was just given");
+
+			slider.Dispose();
+		}
+	}
+
+	[Test]
+	public void HashMarkCountRoundTrips()
+	{
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "hash count probe", "Label:", 0, 100);
+
+			Assert.AreEqual(0, slider.HashMarkCount, "HashMarkCount should default to 0");
+
+			slider.HashMarkCount = 5;
+			Assert.AreEqual(5, slider.HashMarkCount, "HashMarkCount should read back what the property setter was just given");
+
+			slider.Dispose();
+		}
+	}
+
+	[Test]
+	public void HashMarksRoundTrips()
+	{
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "hash marks probe", "Label:", 0, 100);
+
+			Assert.AreEqual(HashMarkLocation.None, slider.HashMarks, "HashMarks should default to None");
+
+			slider.HashMarks = HashMarkLocation.Both;
+			Assert.AreEqual(HashMarkLocation.Both, slider.HashMarks, "HashMarks should read back what the property setter was just given");
+
+			// Hardware-verified alias: Top and Left share the same raw
+			// value (1) -- see HashMarkLocation.cs's own remarks. Setting
+			// one and reading back should compare equal to the other.
+			slider.HashMarks = HashMarkLocation.Top;
+			Assert.AreEqual(HashMarkLocation.Left, slider.HashMarks, "HashMarkLocation.Top and .Left share the same underlying value and must compare equal");
+
+			slider.Dispose();
+		}
+	}
+
+	[Test]
+	public void BarColorRoundTrips()
+	{
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "bar color probe", "Label:", 0, 100);
+
+			// Hardware-verified default -- Haiku's standard control gray,
+			// not a placeholder zero value. See Slider.cs's own doc comment.
+			Assert.AreEqual(new RgbColor(184, 184, 184, 255), slider.BarColor, "BarColor should default to Haiku's standard control gray (184,184,184,255)");
+
+			RgbColor newColor = new RgbColor(10, 20, 30, 255);
+			slider.BarColor = newColor;
+			Assert.AreEqual(newColor, slider.BarColor, "BarColor should read back what the property setter was just given");
+
+			slider.Dispose();
+		}
+	}
+
+	[Test]
+	public void FillColorEnablingRoundTrips()
+	{
+		// Only asserts the RELIABLE path -- see Slider.cs's own FillColor
+		// doc comment for why the value after a disabling SetFillColor
+		// call is deliberately not asserted anywhere in this suite.
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "fill color probe", "Label:", 0, 100);
+
+			Assert.IsFalse(slider.UsesFillColor, "UsesFillColor should default to false");
+
+			RgbColor fill = new RgbColor(200, 100, 50, 255);
+			slider.SetFillColor(true, fill);
+			Assert.IsTrue(slider.UsesFillColor, "UsesFillColor should read back true after SetFillColor(true, ...)");
+			Assert.AreEqual(fill, slider.FillColor, "FillColor should read back exactly what SetFillColor(true, ...) was just given -- confirmed reliable on hardware across every scenario tested");
+
+			slider.SetFillColor(false, fill);
+			Assert.IsFalse(slider.UsesFillColor, "UsesFillColor should read back false after SetFillColor(false, ...) -- this half of the call IS reliable, unlike the resulting FillColor value");
+
+			slider.Dispose();
+		}
+	}
+
+	[Test]
+	public void BarThicknessRoundTrips()
+	{
+		using (new Application(AppSignature)) {
+			Slider slider = new Slider(new Rect(0, 0, 200, 40), "bar thickness probe", "Label:", 0, 100);
+
+			// Hardware-verified default for a horizontal slider.
+			Assert.AreEqual(6.0f, slider.BarThickness, "BarThickness should default to 6.0 for a horizontal slider");
+
+			// Only integer values, and the specific fractional values a
+			// native probe actually confirmed -- see Slider.cs's own
+			// BarThickness doc comment for the full rounding write-up.
+			slider.BarThickness = 20.0f;
+			Assert.AreEqual(20.0f, slider.BarThickness, "BarThickness should read back an integer value exactly");
+
+			slider.BarThickness = 12.5f;
+			Assert.AreEqual(13.0f, slider.BarThickness, "BarThickness should round 12.5 up to 13.0, matching the hardware-verified rounding rule");
+
+			slider.BarThickness = 0.0f;
+			Assert.AreEqual(1.0f, slider.BarThickness, "BarThickness should clamp 0.0 to a minimum of 1.0, matching the hardware-verified rule");
+
+			slider.Dispose();
+		}
+	}
+
 	[Test]
 	public void AddChildUnderWindowSucceeds()
 	{

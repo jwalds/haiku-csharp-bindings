@@ -408,15 +408,26 @@ public class DemoRadioButton : RadioButton
  * inside DemoWindow's constructor, itself only ever called from
  * DemoApplication.OnReadyToRun() below, after Run() has already
  * constructed the owning BApplication.
+ *
+ * Also demonstrates the Slider completeness pass: a custom BarColor (a
+ * steel blue, in place of the default control gray) and hash marks on
+ * both sides of the bar, ten even divisions across the 0-100 range --
+ * both purely cosmetic, so unlike ValueChanged/ValueCommitted they need
+ * no console line to verify, just a screenshot showing them rendered.
  */
 public class DemoSlider : Slider
 {
 	public DemoSlider()
-		: base(new Rect(20, 388, 380, 453), "demo slider", "Volume:", 0, 100)
+		: base(new Rect(20, 388, 380, 470), "demo slider", "Volume:", 0, 100)
 	{
 		SetLimitLabels("Quiet", "Loud");
 		KeyIncrementValue = 5;
 		Position = 0.5f;
+
+		// Completeness-pass additions -- see this class's doc comment.
+		BarColor = new RgbColor(60, 120, 200);
+		HashMarkCount = 11;
+		HashMarks = HashMarkLocation.Both;
 	}
 
 	protected override void OnValueChanged()

@@ -224,6 +224,163 @@ namespace Haiku.Interface
 			}
 		}
 
+		/* COMPLETENESS PASS ADDITIONS BELOW -- see hs_slider.h's own
+		 * updated SCOPE note for the hardware-verified defaults and the
+		 * two genuine surprises documented there before any of this was
+		 * written (BarThickness's rounding, and FillColor's unreliable
+		 * value after a disabling SetFillColor(false, ...) call). */
+
+		/// <summary>
+		/// Microseconds between mouse-position samples while the thumb
+		/// is being dragged. Hardware-verified default: 20000 (20ms),
+		/// matching real BeAPI's own constructor default.
+		/// </summary>
+		public int SnoozeAmount
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_slider_snooze_amount(_handle);
+			}
+			set
+			{
+				CheckNotConsumed();
+				Native.hs_slider_set_snooze_amount(_handle, value);
+			}
+		}
+
+		/// <summary>The number of hash marks (tick marks) drawn alongside the bar. Hardware-verified default: 0. Only visible when <see cref="HashMarks"/> is not <see cref="HashMarkLocation.None"/>.</summary>
+		public int HashMarkCount
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_slider_hash_mark_count(_handle);
+			}
+			set
+			{
+				CheckNotConsumed();
+				Native.hs_slider_set_hash_mark_count(_handle, value);
+			}
+		}
+
+		/// <summary>Where hash marks are drawn relative to the bar. Hardware-verified default: <see cref="HashMarkLocation.None"/>.</summary>
+		public HashMarkLocation HashMarks
+		{
+			get
+			{
+				CheckNotConsumed();
+				return (HashMarkLocation)Native.hs_slider_hash_marks(_handle);
+			}
+			set
+			{
+				CheckNotConsumed();
+				Native.hs_slider_set_hash_marks(_handle, (uint)value);
+			}
+		}
+
+		/// <summary>
+		/// The color the bar itself is drawn with. Hardware-verified
+		/// default: (184, 184, 184, 255), Haiku's standard control gray
+		/// -- not a placeholder zero value.
+		/// </summary>
+		public RgbColor BarColor
+		{
+			get
+			{
+				CheckNotConsumed();
+				byte r, g, b, a;
+				Native.hs_slider_bar_color(_handle, out r, out g, out b, out a);
+				return new RgbColor(r, g, b, a);
+			}
+			set
+			{
+				CheckNotConsumed();
+				Native.hs_slider_set_bar_color(_handle, value.Red, value.Green, value.Blue, value.Alpha);
+			}
+		}
+
+		/// <summary>
+		/// Whether the portion of the bar from the minimum up to the
+		/// current value is drawn with <see cref="FillColor"/> instead
+		/// of <see cref="BarColor"/>. Set together with the fill color
+		/// itself via <see cref="SetFillColor"/>.
+		/// </summary>
+		public bool UsesFillColor
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_slider_uses_fill_color(_handle);
+			}
+		}
+
+		/// <summary>
+		/// The fill color set via <see cref="SetFillColor"/>. GENUINE,
+		/// HARDWARE-VERIFIED QUIRK, see hs_slider.h's own note on
+		/// hs_slider_use_fill_color()/hs_slider_fill_color() for the
+		/// full write-up: after a call to <c>SetFillColor(false, ...)</c>
+		/// (disabling fill color), the value this property reads back is
+		/// NOT reliably predictable from the color that was passed to
+		/// that call -- it has been observed as both (0,0,0,0) and
+		/// whatever the color was immediately before that call, never
+		/// the color actually passed. This property is therefore only
+		/// meaningful while <see cref="UsesFillColor"/> is true, which
+		/// IS reliable -- <c>SetFillColor(true, color)</c> was confirmed
+		/// on hardware to set both properties to exactly what was
+		/// passed, every time, across every scenario tested.
+		/// </summary>
+		public RgbColor FillColor
+		{
+			get
+			{
+				CheckNotConsumed();
+				byte r, g, b, a;
+				Native.hs_slider_fill_color(_handle, out r, out g, out b, out a);
+				return new RgbColor(r, g, b, a);
+			}
+		}
+
+		/// <summary>
+		/// Sets both <see cref="UsesFillColor"/> and <see cref="FillColor"/>
+		/// at once -- matches real BeAPI's own combined
+		/// UseFillColor(useFill, color) setter, which has no separate
+		/// single-ended setter either (same shape as
+		/// <see cref="SetLimits"/>/<see cref="SetLimitLabels"/> above).
+		/// Reliable when <paramref name="useFill"/> is true -- see
+		/// <see cref="FillColor"/>'s own doc comment for the
+		/// hardware-verified quirk when disabling instead.
+		/// </summary>
+		public void SetFillColor(bool useFill, RgbColor color)
+		{
+			CheckNotConsumed();
+			Native.hs_slider_use_fill_color(_handle, useFill, color.Red, color.Green, color.Blue, color.Alpha);
+		}
+
+		/// <summary>
+		/// The bar's thickness in pixels. GENUINE, HARDWARE-VERIFIED
+		/// SURPRISE: real BeAPI rounds this to the nearest integer pixel
+		/// (setting 12.5 reads back as 13.0, 12.4 as 12.0) and clamps to
+		/// a minimum of 1 (setting 0.0 reads back as 1.0) -- confirmed
+		/// with a dedicated native probe across eight values before this
+		/// property was written, not assumed from "it's just a float".
+		/// Hardware-verified default: 6.0 for a default-constructed
+		/// horizontal slider.
+		/// </summary>
+		public float BarThickness
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_slider_bar_thickness(_handle);
+			}
+			set
+			{
+				CheckNotConsumed();
+				Native.hs_slider_set_bar_thickness(_handle, value);
+			}
+		}
+
 		/// <summary>
 		/// Called on the owning window's thread repeatedly while the
 		/// thumb is being dragged -- fires on every drag tick, not just

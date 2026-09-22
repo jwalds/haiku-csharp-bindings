@@ -547,5 +547,55 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern void hs_slider_set_key_increment_value(IntPtr slider, int value);
+
+		/* Completeness pass additions -- see hs_slider.h's own updated
+		 * SCOPE note for the hardware-verified defaults and the two
+		 * genuine surprises documented there (BarThickness's rounding,
+		 * and hs_slider_fill_color()'s unreliable value after a
+		 * disabling hs_slider_use_fill_color(false, ...) call). */
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_snooze_amount(IntPtr slider, int microseconds);
+
+		[DllImport(Lib)]
+		internal static extern int hs_slider_snooze_amount(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_hash_mark_count(IntPtr slider, int count);
+
+		[DllImport(Lib)]
+		internal static extern int hs_slider_hash_mark_count(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_hash_marks(IntPtr slider, uint where);
+
+		[DllImport(Lib)]
+		internal static extern uint hs_slider_hash_marks(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_bar_color(IntPtr slider,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_bar_color(IntPtr slider,
+			out byte outRed, out byte outGreen, out byte outBlue, out byte outAlpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_use_fill_color(IntPtr slider,
+			[MarshalAs(UnmanagedType.I1)] bool useFill,
+			byte red, byte green, byte blue, byte alpha);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_slider_uses_fill_color(IntPtr slider);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_fill_color(IntPtr slider,
+			out byte outRed, out byte outGreen, out byte outBlue, out byte outAlpha);
+
+		[DllImport(Lib)]
+		internal static extern void hs_slider_set_bar_thickness(IntPtr slider, float thickness);
+
+		[DllImport(Lib)]
+		internal static extern float hs_slider_bar_thickness(IntPtr slider);
 	}
 }

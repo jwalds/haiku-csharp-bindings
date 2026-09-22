@@ -9,6 +9,7 @@
 #include <cstddef>
 
 #include <Control.h>
+#include <GraphicsDefs.h>
 #include <Message.h>
 #include <Messenger.h>
 #include <Rect.h>
@@ -251,4 +252,113 @@ void hs_slider_set_key_increment_value(hs_handle slider, int32_t value)
 int32_t hs_slider_key_increment_value(hs_handle slider)
 {
 	return static_cast<HSSlider*>(slider)->KeyIncrementValue();
+}
+
+
+/* Completeness pass additions below -- see hs_slider.h's updated SCOPE
+ * note for the hardware-verified defaults and the two genuine surprises
+ * documented there before any of this was written. */
+
+void hs_slider_set_snooze_amount(hs_handle slider, int32_t microseconds)
+{
+	static_cast<HSSlider*>(slider)->SetSnoozeAmount(microseconds);
+}
+
+
+int32_t hs_slider_snooze_amount(hs_handle slider)
+{
+	return static_cast<HSSlider*>(slider)->SnoozeAmount();
+}
+
+
+void hs_slider_set_hash_mark_count(hs_handle slider, int32_t count)
+{
+	static_cast<HSSlider*>(slider)->SetHashMarkCount(count);
+}
+
+
+int32_t hs_slider_hash_mark_count(hs_handle slider)
+{
+	return static_cast<HSSlider*>(slider)->HashMarkCount();
+}
+
+
+void hs_slider_set_hash_marks(hs_handle slider, uint32_t where)
+{
+	static_cast<HSSlider*>(slider)->SetHashMarks(static_cast<::hash_mark_location>(where));
+}
+
+
+uint32_t hs_slider_hash_marks(hs_handle slider)
+{
+	return static_cast<uint32_t>(static_cast<HSSlider*>(slider)->HashMarks());
+}
+
+
+void hs_slider_set_bar_color(hs_handle slider, uint8_t red, uint8_t green,
+	uint8_t blue, uint8_t alpha)
+{
+	rgb_color color;
+	color.red = red;
+	color.green = green;
+	color.blue = blue;
+	color.alpha = alpha;
+	static_cast<HSSlider*>(slider)->SetBarColor(color);
+}
+
+
+void hs_slider_bar_color(hs_handle slider, uint8_t* out_red,
+	uint8_t* out_green, uint8_t* out_blue, uint8_t* out_alpha)
+{
+	rgb_color color = static_cast<HSSlider*>(slider)->BarColor();
+	*out_red = color.red;
+	*out_green = color.green;
+	*out_blue = color.blue;
+	*out_alpha = color.alpha;
+}
+
+
+void hs_slider_use_fill_color(hs_handle slider, bool use_fill, uint8_t red,
+	uint8_t green, uint8_t blue, uint8_t alpha)
+{
+	/* Always a real, non-NULL pointer -- see hs_slider.h's own note on
+	 * why this shim never needs to pass NULL here, and the surprise
+	 * documented there about what use_fill=false actually does with it. */
+	rgb_color color;
+	color.red = red;
+	color.green = green;
+	color.blue = blue;
+	color.alpha = alpha;
+	static_cast<HSSlider*>(slider)->UseFillColor(use_fill, &color);
+}
+
+
+bool hs_slider_uses_fill_color(hs_handle slider)
+{
+	/* FillColor(NULL) -- hardware-confirmed null-safe, see hs_slider.h. */
+	return static_cast<HSSlider*>(slider)->FillColor(NULL);
+}
+
+
+void hs_slider_fill_color(hs_handle slider, uint8_t* out_red,
+	uint8_t* out_green, uint8_t* out_blue, uint8_t* out_alpha)
+{
+	rgb_color color;
+	static_cast<HSSlider*>(slider)->FillColor(&color);
+	*out_red = color.red;
+	*out_green = color.green;
+	*out_blue = color.blue;
+	*out_alpha = color.alpha;
+}
+
+
+void hs_slider_set_bar_thickness(hs_handle slider, float thickness)
+{
+	static_cast<HSSlider*>(slider)->SetBarThickness(thickness);
+}
+
+
+float hs_slider_bar_thickness(hs_handle slider)
+{
+	return static_cast<HSSlider*>(slider)->BarThickness();
 }

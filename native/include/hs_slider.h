@@ -86,15 +86,35 @@
  * hs_control_value()/hs_control_set_enabled()/hs_control_is_enabled()
  * exactly like every other control in this binding.
  *
- * SCOPE: not every BSlider feature is exposed here. Hash marks/tick
- * marks (SetHashMarks/SetHashMarkCount), bar/fill colors, a custom icon
- * (SetIcon), the snooze amount, and UpdateText()'s status-text override
- * are all deferred to a follow-up slice -- see README.md's "Not yet
- * covered" list. What IS exposed: Position, GetLimits/SetLimits,
- * Orientation, Style (thumb shape), SetLimitLabels/MinLimitLabel/
- * MaxLimitLabel, and KeyIncrementValue -- all simple, cheap property
- * pairs, similar in spirit to Button's IsDefault/IsFlat/Behavior
- * additions beyond raw Control state.
+ * SCOPE, UPDATED FOR THE COMPLETENESS PASS: hash marks/tick marks
+ * (SetHashMarks/SetHashMarkCount), bar/fill colors (SetBarColor/
+ * UseFillColor), the snooze amount, and bar thickness are now all
+ * exposed below -- see the per-function doc comments for the hardware-
+ * verified defaults and two genuine surprises found while probing them:
+ * SetBarThickness() rounds its float argument to the nearest integer
+ * pixel and clamps to a minimum of 1 (SetBarThickness(0.0) reads back
+ * as 1.0), and UseFillColor(false, ...)'s effect on the color
+ * hs_slider_fill_color() reads back afterward is NOT reliably
+ * predictable from the color argument passed to that call -- verified
+ * with a multi-scenario native probe before relying on it, not assumed.
+ * See hs_slider_fill_color()'s own doc comment below for the exact
+ * finding and why this binding does not try to paper over it.
+ *
+ * Still NOT exposed, a deliberate scope decision rather than an
+ * oversight: SetIcon (needs a BBitmap binding this project doesn't have
+ * yet), SetFont (needs a BFont binding this project doesn't have
+ * either -- a fact only surfaced during this completeness pass, not
+ * previously documented), UpdateText()/UpdateTextChanged() (a virtual
+ * hook meant to be overridden to inject custom status text during
+ * drawing -- doing this properly needs the same kind of native-owned,
+ * per-call string lifetime management HSTextControl's Text() getter
+ * already handles, but for a *virtual override* rather than a plain
+ * getter, which is a meaningfully different and riskier shape not
+ * undertaken here), ValueForPoint(), and the raw drawing internals
+ * (DrawSlider/DrawBar/DrawHashMarks/DrawThumb/DrawFocusMark/DrawText/
+ * BarFrame/HashMarksFrame/ThumbFrame/OffscreenView) -- consistent with
+ * this binding's standing choice not to expose BControl subclasses'
+ * native-drawing internals anywhere else either.
  */
 #ifndef HS_SLIDER_H
 #define HS_SLIDER_H
@@ -172,6 +192,92 @@ const char* hs_slider_max_limit_label(hs_handle slider);
 
 void hs_slider_set_key_increment_value(hs_handle slider, int32_t value);
 int32_t hs_slider_key_increment_value(hs_handle slider);
+
+/* Completeness pass additions below -- see this file's own updated SCOPE
+ * note above for what was hardware-verified before any of this was
+ * written, and the two genuine surprises found doing it. */
+
+/* Microseconds between mouse-position samples while the thumb is being
+ * dragged. Hardware-verified default: 20000 (20ms), matching the real
+ * BSlider constructor's own default; confirmed to round-trip exactly
+ * after SetSnoozeAmount(). */
+void hs_slider_set_snooze_amount(hs_handle slider, int32_t microseconds);
+int32_t hs_slider_snooze_amount(hs_handle slider);
+
+/* Hash marks (tick marks) drawn alongside the bar. Hardware-verified
+ * default: count 0, location B_HASH_MARKS_NONE (0); both round-trip
+ * exactly after being set. `where` is the raw `hash_mark_location`
+ * value -- see HashMarkLocation.cs for the aliased values this mirrors
+ * (B_HASH_MARKS_TOP == B_HASH_MARKS_LEFT == 1, B_HASH_MARKS_BOTTOM ==
+ * B_HASH_MARKS_RIGHT == 2 -- confirmed on hardware: setting TOP and
+ * reading back gives the same raw value as LEFT would). */
+void hs_slider_set_hash_mark_count(hs_handle slider, int32_t count);
+int32_t hs_slider_hash_mark_count(hs_handle slider);
+void hs_slider_set_hash_marks(hs_handle slider, uint32_t where);
+uint32_t hs_slider_hash_marks(hs_handle slider);
+
+/* Colors cross as four bytes rather than an hs_rgb_color struct, same
+ * convention as hs_view_set_high_color()/etc. (see hs_view.h's own note
+ * on why). Hardware-verified default BarColor: (184, 184, 184, 255) --
+ * Haiku's standard control gray, not a placeholder zero value; confirmed
+ * to round-trip exactly after SetBarColor(). */
+void hs_slider_set_bar_color(hs_handle slider, uint8_t red, uint8_t green,
+	uint8_t blue, uint8_t alpha);
+void hs_slider_bar_color(hs_handle slider, uint8_t* out_red,
+	uint8_t* out_green, uint8_t* out_blue, uint8_t* out_alpha);
+
+/* hs_slider_use_fill_color(): always passes a real, non-NULL rgb_color
+ * pointer to the underlying BSlider::UseFillColor() (constructed from
+ * the four bytes given here), even when use_fill is false -- real
+ * BeAPI's own signature allows a NULL color pointer there, but this
+ * shim never needs to pass one.
+ *
+ * GENUINE, HARDWARE-VERIFIED SURPRISE, found with a multi-scenario
+ * native probe before this function was written: when use_fill is
+ * false, the color bytes passed here do NOT reliably become what
+ * hs_slider_fill_color() reads back afterward. Across three isolated
+ * scenarios (fresh slider disabled with a non-NULL color; enabled then
+ * disabled with a NULL color; enabled then disabled with a DIFFERENT
+ * non-NULL color) the resulting color was sometimes (0,0,0,0) and
+ * sometimes the color from BEFORE the disable call, never the color
+ * bytes actually passed to a disabling call. The root cause inside
+ * BSlider::UseFillColor()'s own implementation is not understood --
+ * recorded as a verified hardware fact to design around, not a solved
+ * mystery, matching this project's standing rule (see the CheckBox/
+ * RadioButton BApplication asymmetry in hs_checkbox.h/hs_radio_button.h
+ * for the precedent). Practical consequence: Slider.cs's FillColor
+ * property is documented as meaningful only while UsesFillColor is
+ * true, and SliderTests.cs does not assert any particular FillColor
+ * value after a disabling call -- only that UsesFillColor itself
+ * becomes false, and that the ENABLING path (use_fill=true) reliably
+ * sets both UsesFillColor and FillColor to what was just passed, which
+ * IS reliable and was confirmed across every scenario tested. */
+void hs_slider_use_fill_color(hs_handle slider, bool use_fill, uint8_t red,
+	uint8_t green, uint8_t blue, uint8_t alpha);
+/* Wraps FillColor(NULL) -- hardware-confirmed null-safe, does not
+ * crash, even before UseFillColor has ever been called on this
+ * slider. */
+bool hs_slider_uses_fill_color(hs_handle slider);
+/* Wraps FillColor(&out) and discards its bool return (use
+ * hs_slider_uses_fill_color() for that) -- see the SURPRISE note above
+ * for why the value this reads back after a disabling call should not
+ * be relied on. Before UseFillColor has ever been called at all on a
+ * given slider, this returns whatever uninitialized bytes BSlider's own
+ * constructor happens to leave in that member -- hardware-confirmed via
+ * probe, not zeroed -- so managed code must not read this before
+ * calling hs_slider_use_fill_color() at least once. */
+void hs_slider_fill_color(hs_handle slider, uint8_t* out_red,
+	uint8_t* out_green, uint8_t* out_blue, uint8_t* out_alpha);
+
+/* GENUINE, HARDWARE-VERIFIED SURPRISE: BarThickness rounds its float
+ * argument to the nearest integer pixel (12.5 reads back as 13.0, 12.4
+ * as 12.0, 6.9 as 7.0) and clamps to a minimum of 1 (SetBarThickness(0.0)
+ * reads back as 1.0) -- confirmed with a dedicated native probe across
+ * eight values before this function was written, not assumed from
+ * "it's just a float setter". Hardware-verified default: 6.0 for a
+ * default-constructed horizontal slider. */
+void hs_slider_set_bar_thickness(hs_handle slider, float thickness);
+float hs_slider_bar_thickness(hs_handle slider);
 
 #ifdef __cplusplus
 }

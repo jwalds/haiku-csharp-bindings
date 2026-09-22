@@ -221,6 +221,96 @@ above without ever getting closer to a working fix.
 
 ---
 
+## 5. A real SIGSEGV, not just issue #3's benign warning, seen once during window teardown under a larger test suite
+
+**Symptom:** during the Slider-completeness pass's verification (bringing
+`Tests.exe` from 115 to 121 tests, none of them touching threading,
+windows, or `BLooper` in any way -- see `managed/Tests/SliderTests.cs`),
+four consecutive full `Tests.exe` runs against the exact same freshly
+rebuilt binary produced four different outcomes: a clean pass, a clean
+pass with issue #3's already-known benign "Failed aborting id" warning, a
+run with one unrelated test (`ApplicationTests.cs`'s
+`ReadyToRunMessageAndQuitRequestedAllFireInOrder`, failing on "OnMessageReceived
+should have fired for our own PING") failing with no crash, and finally a
+run that printed repeated `mono-hash.c:282`/`mono-hash.c:442`
+`assertion 'hash != NULL' failed` lines and stopped making progress
+entirely, which turned out (found only after `kill -9`, via `hey -o 46
+COUNT Window` and a stale-crash-dialog check learned from issue #4's own
+"Also observed" note) to be a real, `debug_server`-caught SIGSEGV.
+
+**Confirmed:**
+- The crash's native stack trace (`/var/log/syslog`, `debug_server:
+  Thread 4030 entered the debugger: Segment violation`) is squarely in
+  the same "foreign thread calling into Mono" territory issue #3 already
+  root-caused in detail: `BWindow::~BWindow()` -> `BView::_RemoveSelf()`
+  -> `BView::_Detach()` -> back into
+  `mono_thread_execute_interruption_ptr` -> a fault inside Mono's own
+  `mono_thread_execute_interruption`. This is the *destruction*-time
+  sibling of issue #3's *quit*-time warning -- same window message-loop
+  thread, same general "Mono's thread bookkeeping for a Haiku-spawned
+  thread doesn't line up with what's actually happening to that thread"
+  category, but a hard fault instead of a caught, logged, non-fatal case.
+- Not caused by the Slider completeness changes themselves: none of
+  `hs_slider.h`/`hs_slider.cpp`/`Slider.cs`/`HashMarkLocation.cs` touch
+  threading, `BWindow`, `BLooper`, or Mono's embedding layer at all --
+  every new member is a direct, synchronous getter/setter wrapping a
+  simple `BSlider` accessor. `SliderTests.cs`'s own
+  `AddChild`/`RemoveChild`/`Dispose`/cascade-destroy tests are copied
+  verbatim from every other control's test file's own established
+  pattern (see e.g. `ButtonTests.cs`, `TextControlTests.cs`), not new
+  code shaped any differently than what already ran clean across ten
+  prior slices' worth of full-suite runs.
+- Two back-to-back clean runs *were* obtained immediately after the fresh
+  from-scratch rebuild (`make -C native clean && rm -f *.dll *.exe &&
+  ./build.sh`, zero warnings) -- the crash above only showed up on a
+  third and fourth *extra* run done out of caution after noticing an
+  unrelated, much older stale crash dialog on screen (see "Ruled out"
+  below). So this is not "every run crashes"; it's closer to issue #3's
+  own already-documented non-determinism (that one: "roughly 2 of 7
+  attempts"), just occasionally escalating to a hard fault instead of a
+  warning -- plausibly because 121 tests now construct and tear down more
+  `BWindow`/`BApplication` instances per process than the 115-test suite
+  did, giving this pre-existing race more chances to land badly within a
+  single `Tests.exe` invocation.
+
+**Ruled out:**
+- Not the same event as the two *other* stale `debug_server` "Crashed
+  program" dialogs found on screen at the very start of this
+  investigation (one for a `probe_slider_noapp` scratch binary from the
+  original Slider ABI-verification work, one an older
+  `mono_code_manager_reserve_align` JIT crash) -- both of those were
+  confirmed stale by their position in `/var/log/syslog` (well before the
+  end of the file, with no crash entries at all between them and this
+  session's own work) and dismissed via `hey -o 46 QUIT Window <n>`
+  before this run-4 crash happened. This entry is about the *new* crash
+  that appeared afterward, at line 3475 of that same log.
+
+**Not yet known:** same caveat as issues #3/#4 -- real debugging (`gdb`
+with matching symbols for `libmonosgen`/`libbe`, neither shipped by this
+Haiku port) would be needed to say whether this is literally the same
+underlying defect as issue #3 manifesting more severely, or a related but
+distinct fault in Mono's thread-interruption path specifically. Not
+chased further here, consistent with issues #3/#4's own conclusion that
+guessing-and-rerunning without real debug tooling just produces more
+inconclusive data points, not a fix.
+
+**Current handling:** none needed for correctness -- no single test's
+PASS/FAIL result was ever wrong because of this; the crash happens during
+process teardown, after results have already been determined (and, in the
+runs where it didn't happen, already printed). Treated as the same class
+of "known, tracked, non-blocking" issue as #3, not as something the
+Slider completeness work needs to (or plausibly could) fix. `hey -o 46
+QUIT Window <n>` (found during this investigation) is now the fastest way
+to dismiss a stale `debug_server` "Crashed program" dialog over SSH
+without a GUI input tool -- worth reusing directly if this recurs, rather
+than rediscovering it.
+
+**Where documented in code:** nowhere in source -- this is a runtime/test-
+process phenomenon, not something a particular file's behavior can
+document. Recorded here only.
+
+---
+
 ## Fixed
 
 **FIXED** -- see the commit that added this line for the actual change.
