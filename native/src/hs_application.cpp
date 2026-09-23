@@ -7,10 +7,14 @@
 #include "hs_application.h"
 
 #include <cstddef>
+#include <cstdio>
 
 #include <Application.h>
 #include <Message.h>
 #include <OS.h>
+
+#include "hs_mono_thread_attach.h"
+#include "hs_mono_thread_detach.h"
 
 
 namespace {
@@ -31,12 +35,29 @@ public:
 		fQuitRequestedCallback(NULL),
 		fQuitRequestedUserData(NULL),
 		fReadyToRunCallback(NULL),
-		fReadyToRunUserData(NULL)
+		fReadyToRunUserData(NULL),
+		fRun(false)
 	{
+	}
+
+	/* FIX (KNOWN_ISSUES.md #3/#5): HSApplication had no destructor at
+	 * all before this -- its own message-loop thread independently
+	 * produces the identical warning (see KNOWN_ISSUES.md #3's
+	 * "not window-specific" note). Guarded to run only when Run()
+	 * actually happened (fRun), since hs_application_destroy() is
+	 * also reachable on a never-Run() handle, on a thread that is NOT
+	 * exiting -- see hs_application.h's ownership note. */
+	virtual ~HSApplication()
+	{
+		if (fRun)
+			hs_internal::MarkThreadForMonoDetachOnExit();
 	}
 
 	virtual void MessageReceived(BMessage* message)
 	{
+		/* FIX (KNOWN_ISSUES.md #3/#5): see hs_mono_thread_attach.h. */
+		hs_internal::EnsureThreadAttached();
+
 		if (fMessageReceivedCallback != NULL) {
 			fMessageReceivedCallback(fMessageReceivedUserData,
 				static_cast<hs_handle>(message));
@@ -47,6 +68,9 @@ public:
 
 	virtual bool QuitRequested()
 	{
+		/* FIX (KNOWN_ISSUES.md #3/#5): see hs_mono_thread_attach.h. */
+		hs_internal::EnsureThreadAttached();
+
 		if (fQuitRequestedCallback != NULL)
 			return fQuitRequestedCallback(fQuitRequestedUserData) != 0;
 		return BApplication::QuitRequested();
@@ -54,6 +78,9 @@ public:
 
 	virtual void ReadyToRun()
 	{
+		/* FIX (KNOWN_ISSUES.md #3/#5): see hs_mono_thread_attach.h. */
+		hs_internal::EnsureThreadAttached();
+
 		if (fReadyToRunCallback != NULL)
 			fReadyToRunCallback(fReadyToRunUserData);
 		else
@@ -81,6 +108,15 @@ public:
 		fReadyToRunUserData = userData;
 	}
 
+	/* FIX (KNOWN_ISSUES.md #3/#5): called from hs_application_run_
+	 * and_wait() right after Run() succeeds, so the destructor (which
+	 * fires from the looper thread's own shutdown, inside that same
+	 * call's wait_for_thread()) knows this thread is the one exiting. */
+	void MarkRun()
+	{
+		fRun = true;
+	}
+
 private:
 	hs_message_received_callback	fMessageReceivedCallback;
 	void*							fMessageReceivedUserData;
@@ -88,6 +124,7 @@ private:
 	void*							fQuitRequestedUserData;
 	hs_ready_to_run_callback		fReadyToRunCallback;
 	void*							fReadyToRunUserData;
+	bool							fRun;
 };
 
 } // namespace
@@ -104,6 +141,14 @@ hs_handle hs_application_create(const char* signature, hs_status* out_error)
 			*out_error = error;
 		return NULL;
 	}
+
+	/* FIX (KNOWN_ISSUES.md #3/#5): this runs on the real app's own
+	 * thread, which Mono already has valid domain state for (it's
+	 * running this very C call from managed code) -- see
+	 * hs_mono_thread_attach.h. Cheap, and only needs to happen once
+	 * per process, but hs_application_create() only ever runs once in
+	 * practice anyway (see KNOWN_ISSUES.md #1). */
+	hs_internal::CacheRootDomainForAttach();
 
 	if (out_error != NULL)
 		*out_error = HS_OK;
@@ -151,6 +196,7 @@ hs_status hs_application_run_and_wait(hs_handle app)
 	thread_id looperThread = realApp->Run();
 	if (looperThread < 0)
 		return static_cast<hs_status>(looperThread);
+	realApp->MarkRun();
 
 	/* Block THIS thread (not the looper thread) until the looper thread
 	 * exits. This is a real kernel wait (wait_for_thread), not polling.

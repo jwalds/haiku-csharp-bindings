@@ -3,8 +3,8 @@
 # no cross-compilation story here yet.
 
 CXX ?= g++
-CXXFLAGS ?= -O2 -fPIC -Wall -Wextra -Iinclude
-LDFLAGS ?= -lbe
+CXXFLAGS ?= -O2 -fPIC -Wall -Wextra -Iinclude -I/boot/system/develop/headers/mono-2.0
+LDFLAGS ?= -lbe -lmonosgen-2.0
 
 SRCS := src/hs_application.cpp src/hs_message.cpp src/hs_window.cpp src/hs_view.cpp src/hs_control.cpp src/hs_button.cpp src/hs_text_control.cpp src/hs_checkbox.cpp src/hs_radio_button.cpp src/hs_slider.cpp src/hs_color_control.cpp src/hs_list_view.cpp
 OBJS := $(SRCS:.cpp=.o)

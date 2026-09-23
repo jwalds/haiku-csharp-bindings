@@ -111,7 +111,7 @@ remarks), `managed/Tests/ApplicationTests.cs` (class remarks), details.md's
 
 ---
 
-## 3. Benign "Failed aborting id" Mono warning on window quit; the "obvious" fix crashes
+## 3. Benign "Failed aborting id" Mono warning on window quit; two crash-prone "obvious" fixes, and the real one
 
 **Symptom:** quitting a shown window (verified both by clicking its real
 close box on hardware, and by sending it `B_QUIT_REQUESTED` via `hey`)
@@ -162,7 +162,7 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
 -- and it never appeared across two full `Tests.exe` runs, even though
 `WindowTests` also shows and quits a window in the same process.
 
-**Fix attempts -- the first two crash; do not ship any of these:**
+**Fix attempts -- the first two crash; do not ship either of these:**
 
 1. *Call `mono_thread_detach(mono_thread_current())` cold, as the last
    line of `~HSWindow()`, guarded by "only if this window was ever shown"
@@ -200,11 +200,9 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
 
    Three different theories about *when* it's safe to call
    `mono_thread_current()` from native code on this thread all converged
-   on the same crash. That's strong evidence this isn't a
-   caching/ordering problem at all -- calling this specific embedding
-   function natively from this call site (nested inside `BWindow`'s
-   self-quit sequence, on a Haiku-spawned foreign thread) appears to be
-   unsafe outright in this Mono build, for a reason not yet identified.
+   on the same crash at the time -- but see fix attempt 4 below for what
+   this really meant: not "unsafe outright", but "unsafe on a thread that
+   was never actually completely attached in the first place."
 
 3. *Call `mono_thread_detach_if_exiting()` (`mono/metadata/threads.h`)
    instead of `mono_thread_detach(mono_thread_current())` -- a different
@@ -223,7 +221,8 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
      iteration `HammerProbe.exe` (a standalone, non-`Tests.exe`
      scratch program that show/quit-cycles many windows in one
      process, to multiply this non-deterministic symptom's chances of
-     appearing) across 4 separate runs -- 180 total show/quit/destroy
+     appearing -- kept in the repo root, see its own header comment)
+     across 4 separate runs -- 180 total show/quit/destroy
      cycles, zero crashes: a real, hardware-confirmed safety
      improvement over attempts 1-2. But a temporary `fprintf` on its
      return value showed it returns `FALSE` (a no-op) on every single
@@ -256,56 +255,176 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
      with the function being a no-op here regardless of when it's
      called.
 
-**Not yet known:** the actual mechanism inside `libmonosgen-2.0` that
-makes `mono_thread_current()` crash here specifically, or why
-`mono_thread_detach_if_exiting()` -- confirmed safe, confirmed reachable
-at each thread's genuine OS-level exit via a working `pthread_key_t`
-destructor -- still always returns `FALSE` for these threads. The
-leading theory after this investigation: `mono_thread_detach_if_
-exiting()` most likely checks a Mono-*internal* flag that only Mono's
-own thread-creation/exit machinery sets for threads it created itself
-(e.g. via `mono_thread_create()`), not a generic "is this OS thread
-actually exiting" fact -- which would mean no call-site timing fix can
-ever make it succeed for a foreign, implicitly-attached thread, and this
-whole embedding function may simply be the wrong tool for this job.
-Pinning that down for certain needs a real debugger stepping through
-`threads.c` inside `libmonosgen-2.0.so`, not another externally-observed
-return value.
+4. **THE REAL FIX (shipped) -- explicit `mono_thread_attach()`, found via
+   `gdb` with real debug symbols.** This Haiku mono port turned out *not*
+   to be stripped after all (see "Where to pick this up" in the version
+   of this entry before this fix landed) -- a live `gdb` backtrace of
+   attempt-1's exact SIGSEGV, reproduced fresh, showed real symbols and
+   line numbers all the way down:
 
-**Current handling:** left as the original warning-only behavior (no
-`mono_thread_detach()` call anywhere). `hs_window.cpp`/`hs_window.h` are
-unchanged from the version committed in
-`26b2d27` ("Add BWindow bindings ..."). All three fix attempts were
-fully reverted; nothing from this investigation is in the committed code
-except this write-up. Attempt 3's changes additionally touched
-`hs_application.cpp`/`native/Makefile` and a new (also reverted)
-`hs_mono_thread_detach.h` helper -- all three confirmed (via `md5sum`)
-byte-for-byte unchanged from before that investigation once reverted.
+   ```
+   mono_thread_current() [threads.c:2184]
+   -> get_current_thread_ptr_for_domain(domain=0x0, ...) [threads.c:632]
+   -> mono_class_vtable_checked(domain=0x0, klass=..., ...) [object.c:1943]
+   -> crashes dereferencing a field at domain+0x7c -- domain is NULL.
+   ```
 
-**Where to pick this up:** the original warning still applies to
-`mono_thread_current()`/`mono_thread_detach()` called bare from
-`hs_window.cpp` -- assume both are unsafe from this call site until
-proven otherwise with a real debugger attached. `mono_thread_detach_if_
-exiting()` is safe from any of the call sites tried so far, but three
-different variants of *when* to call it all converged on the same
-no-op, which is a different kind of dead end, not a timing puzzle still
-worth iterating on by guesswork.
+   `mono_domain_get()` returns `NULL` on this thread. Mono's *implicit*
+   attach (triggered by the JIT trampoline the first time this shim calls
+   into managed code on a Haiku-spawned thread) gets the thread far
+   enough to actually run JIT'd code, but never sets that thread's
+   current-`MonoDomain` TLS the way an *explicit* `mono_thread_attach(
+   domain)` call does. Every one of attempts 1-3 above assumed the
+   problem was *when* to call `mono_thread_current()`/`mono_thread_
+   detach()` on an already-implicitly-attached thread; none questioned
+   whether that implicit attach was ever complete in the first place. It
+   wasn't.
 
-A real next step, not yet tried: this investigation found `gdb` (GNU
-gdb 17.2) *is* actually installed on this Haiku box (`/boot/system/
-bin/gdb`), contrary to what this entry previously assumed -- what's
-still missing is matching debug symbols for `libmonosgen`/`libbe`
-(`pkgman search debuginfo` finds neither package). Attach `gdb` to a
-running `Tests.exe` (or a dedicated show/quit-cycling scratch program
-like this session's `HammerProbe.exe`, not committed but trivial to
-recreate from this write-up) and either set a breakpoint directly on
-the exported `mono_thread_detach_if_exiting` symbol (visible via `nm
--D libmonosgen-2.0.so` even without debug info) to step through its
-actual logic without symbols, or at minimum catch issue #5's SIGSEGV
-with a real native backtrace instead of only externally-observed
-symptoms -- gdb without debug symbols still resolves return addresses
-to the nearest exported function name, which is more than any attempt
-so far has had.
+   The fix: `native/src/hs_mono_thread_attach.h` (new, committed) caches
+   the root `MonoDomain*` once, cheaply, from `hs_application_create()`
+   (`CacheRootDomainForAttach()` -- always called on a thread Mono
+   already has valid domain state for, since it's running that very
+   native call from managed code), and `EnsureThreadAttached()` calls
+   `mono_thread_attach(domain)` explicitly, guarded by a `__thread` flag
+   so it only does real work once per thread, from the very first line of
+   every native->managed callback trampoline that might run on a
+   Haiku-spawned thread (`hs_window.cpp`'s `MessageReceived()`/
+   `QuitRequested()`, `hs_application.cpp`'s `MessageReceived()`/
+   `QuitRequested()`/`ReadyToRun()`). `mono_thread_attach()` on an
+   already-attached thread is cheap and safe (returns the existing
+   `MonoThread*`), so even without the guard a redundant call would be
+   harmless.
+
+   **Verified on real hardware:** with this fix in place,
+   `mono_thread_current()` no longer crashes anywhere it's called from
+   these threads. 280 `HammerProbe.exe` show/quit cycles across 6 runs,
+   zero crashes -- and, crucially, this is also what let testing get far
+   enough to discover a second, previously-unreachable bug (see fix
+   attempt 5 immediately below, and issue #5, which this fix also
+   plausibly resolves -- see that issue's update).
+
+5. *Having fixed attempt 1-3's crash, try a REAL `mono_thread_detach(
+   mono_thread_current())` again in `~HSWindow()`/`~HSApplication()`,
+   now that `mono_thread_current()` itself no longer crashes -- hoping to
+   finally get a genuine, non-no-op fix for this issue's actual warning.*
+   **Do not ship this either -- it trades a cosmetic warning for two
+   different, worse, 100%-reproducible failures**, both found by A/B
+   testing on real hardware (toggling only this one call, nothing else,
+   between runs) and both root-caused with a real `gdb` backtrace:
+   - **A window whose thread ever ran `BView::Draw()`:** a fatal
+     `g_error` abort, every time, no exceptions. Backtrace:
+     `mono_thread_detach()` -> `mono_threads_enter_gc_safe_region_
+     unbalanced_with_info()` -> `mono_threads_transition_do_blocking()`
+     -> `"Cannot transition thread ... from STATE_BLOCKING with
+     DO_BLOCKING"`. `Draw()`'s own app_server IPC round-trip leaves the
+     thread parked in Mono's cooperative-GC `STATE_BLOCKING`, unbalanced
+     (nothing in this shim's `BView::Draw()` override wraps that IPC call
+     with the matching `mono_threads_exit_gc_safe_region`-style pair Mono
+     expects for anything that blocks) -- and `mono_thread_detach()`
+     then tries to enter that same blocking state *again*, which Mono's
+     state machine treats as a fatal double-transition, not a no-op.
+   - **A window whose thread never drew:** no crash at the call site --
+     `mono_thread_detach()` returns normally -- but a corrupted internal
+     Mono hash table, surfacing only later, at process shutdown, as
+     `mono-hash.c:282`/`mono-hash.c:442`'s `"assertion 'hash != NULL'
+     failed"`, printed over and over, forever: the process never exits,
+     its exit code never returns, and it has to be `kill -9`'d. This is
+     the *exact* symptom issue #5 already documented as one of four
+     non-deterministic outcomes of a stock `Tests.exe` run, well before
+     this session's detach code existed -- i.e. this is very likely the
+     same latent, pre-existing Mono/Haiku-port bug in the runtime's own
+     per-thread bookkeeping, just one this specific "successful-looking"
+     detach call turns from a rare, spontaneous occurrence into a
+     reliably-triggered one.
+   - Confirmed via direct A/B comparison, same build, same test suite,
+     only this one call toggled: with the real detach call in place (via
+     a temporary `ThreadUsedDrawing()` per-thread flag set from
+     `HSView::Draw()`, so the destructor could take the crash-avoiding
+     safe path for drawing windows and the real-detach path for
+     non-drawing ones -- this scaffolding was fully removed again once
+     the experiment concluded, see "Current handling" below), a full
+     `Tests.exe` run hung at process shutdown with the `mono-hash.c`
+     spam. Forcing the exact same build to *always* take the safe,
+     no-op-capable path instead (no code changes other than that one
+     branch) produced five consecutive clean full-suite runs (149
+     passed, 0 failed each time), clean process exits every time (no
+     lingering process, no hash-table spam), with the pre-existing
+     benign warning appearing in roughly the same historical proportion
+     (2 of 5 runs) and nothing else different. The real detach call is
+     the only variable that changed between "hangs forever" and "exits
+     clean" in this comparison.
+   - A red herring hit twice during this same investigation, worth
+     recording so it isn't rediscovered from scratch: `Tests.exe`
+     appearing to hang with *no* diagnostic output at all past
+     `ReadyToRunMessageAndQuitRequestedAllFireInOrder ...` turned out
+     both times to be Haiku's own `screen_blanker` (screensaver) having
+     kicked in during the unattended SSH session and fully covering the
+     test window -- app_server has nothing to paint for a fully-obscured
+     view, so `Draw()` (and everything downstream of it, including this
+     fix's own diagnostics) never fires at all. This is the exact same
+     false lead issue #4 already documents; `kill`ing `screen_blanker`
+     (or otherwise keeping the display active) before an unattended test
+     run resolves it immediately and is not evidence of any code bug.
+
+**Not yet known:** why `mono_thread_detach_if_exiting()` (attempt 3)
+always returns `FALSE` for these threads even when called from a
+genuinely-correct, confirmed-at-real-exit call site, and the exact
+mechanism behind fix attempt 5's mono-hash corruption (only that it's
+real, reliably triggered by a real detach call, and matches a failure
+mode issue #5 already observed occurring spontaneously). Both would need
+a real debugger stepping through `libmonosgen-2.0.so`'s thread/GC/hash
+internals with the domain-attach fix already active, which was not
+pursued further once fix attempt 5 confirmed that path isn't safe to
+ship regardless of the answer -- there is no version of "call `mono_
+thread_detach()` for real" proven safe to use here, so understanding
+exactly why is a research question, not a blocker for anything real
+apps built on this binding need.
+
+**Current handling:** the domain-attach fix (fix attempt 4) is shipped
+-- `native/src/hs_mono_thread_attach.h` is wired into every native-
+>managed callback trampoline in `hs_window.cpp` and `hs_application.cpp`,
+and `hs_application_create()` caches the root domain. This is a real,
+hardware-verified fix for the original SIGSEGV crash (attempts 1-2) and
+plausibly for issue #5's independently-observed SIGSEGV too (see that
+issue's update). On top of that, `~HSWindow()`/`~HSApplication()`
+unconditionally call `hs_internal::MarkThreadForMonoDetachOnExit()`
+(`native/src/hs_mono_thread_detach.h`, new, committed -- the safe,
+pthread-TLS-destructor-based wrapper around `mono_thread_detach_if_
+exiting()` from fix attempt 3) when the window was ever shown / the app
+was ever run. This does **not** silence the benign "Failed aborting id"
+warning this issue is named for -- attempt 3 already showed that call is
+always a no-op for these threads -- but it's proven safe in every
+configuration tested (`HammerProbe.exe`, `Tests.exe`, both individually
+and combined), unlike either flavor of a real detach (fix attempt 5).
+The net effect versus where this binding started: calling into managed
+code from any Haiku-spawned thread (`BWindow`'s or `BApplication`'s own
+message loop) no longer crashes at all, in any tested configuration --
+only this one cosmetic, harmless, non-deterministic warning remains, and
+it is understood in full detail (see "Confirmed root cause" above) even
+though it isn't eliminated.
+
+**Where to pick this up:** eliminating the warning itself (not just the
+crashes around it) would require either (a) understanding why `mono_
+thread_detach_if_exiting()` is always a no-op here well enough to find a
+call site or condition where it isn't, or (b) understanding fix attempt
+5's mono-hash corruption well enough to fix *that*, so a real detach
+becomes safe to ship. Both need a real debugger session stepping through
+`libmonosgen-2.0.so` itself (gdb is installed and DOES have real symbols
+for this build, once the fault or breakpoint is inside code that's
+actually been loaded -- see fix attempt 4's own discovery) rather than
+another externally-observed-behavior experiment; several of those have
+now been run and each one answered a narrower question than it raised.
+Given the warning is confirmed non-fatal and now the *only* remaining
+symptom in this whole area, this is a coloring-in problem, not a
+blocker.
+
+**Where documented in code:** `native/src/hs_mono_thread_attach.h` (the
+domain-attach fix itself, and fix attempt 5's ruled-out real-detach
+finding, in detail) and `native/src/hs_mono_thread_detach.h` (the safe
+fallback) -- both files' own header comments. `hs_window.cpp`'s
+`~HSWindow()` and `hs_application.cpp`'s `~HSApplication()` each carry a
+shorter version of the same story at their own call sites. `HammerProbe.cs`
+(repo root) is the standalone stress-test tool referenced throughout.
 
 ---
 
@@ -383,6 +502,35 @@ distinct fault in Mono's thread-interruption path specifically. Not
 chased further here, consistent with issues #3/#4's own conclusion that
 guessing-and-rerunning without real debug tooling just produces more
 inconclusive data points, not a fix.
+
+**Update (later session) -- issue #3's fix attempt 4 plausibly fixes this
+too.** That session's `gdb` work (see issue #3) root-caused a real,
+reproducible SIGSEGV in the exact same territory this entry describes --
+`mono_thread_current()` crashing on a Haiku-spawned thread because
+`mono_domain_get()` returns `NULL` there, from an implicit-only Mono
+attach that never completes -- and shipped a fix (explicit
+`mono_thread_attach()` in every native->managed callback trampoline,
+`native/src/hs_mono_thread_attach.h`). This entry's own crash (`BWindow::
+~BWindow()` -> `BView::_Detach()` -> `mono_thread_execute_interruption`)
+is squarely the same category -- a foreign thread's Mono bookkeeping
+being incomplete -- though not confirmed to be byte-for-byte the same
+fault without a real debugger attached to *this specific* crash (which
+was never reproduced again to re-check). What's confirmed instead: with
+the domain-attach fix in place, extensive later hardware testing (280+
+`HammerProbe.exe` show/quit cycles across multiple sessions, several
+full `Tests.exe` runs including ones that specifically exercise
+`BView::Draw()` and window teardown together) produced zero SIGSEGVs of
+any kind. That same investigation also found a *different*, real bug
+living in this exact neighborhood -- calling a real `mono_thread_
+detach()` (which this entry's crash is NOT calling; nothing in the
+codebase does) can corrupt an internal Mono hash table, surfacing as
+this entry's own already-documented `mono-hash.c` `"assertion 'hash !=
+NULL' failed"` spam -- see issue #3's fix attempt 5. That confirms this
+class of hash corruption is a real, latent phenomenon in this Mono/
+Haiku-port combination (not a one-off fluke), which is independently
+useful context for this entry even though the *trigger* found there
+(a real detach call) is never exercised by any code path that could
+have produced this entry's original run-4 crash.
 
 **Current handling:** none needed for correctness -- no single test's
 PASS/FAIL result was ever wrong because of this; the crash happens during

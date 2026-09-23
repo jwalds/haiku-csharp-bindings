@@ -8,12 +8,16 @@
 #include "hs_window.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include <Window.h>
 #include <Message.h>
 #include <Rect.h>
 #include <View.h>
+
+#include "hs_mono_thread_attach.h"
+#include "hs_mono_thread_detach.h"
 
 
 namespace {
@@ -36,7 +40,8 @@ public:
 		fQuitRequestedCallback(NULL),
 		fQuitRequestedUserData(NULL),
 		fDestroyedCallback(NULL),
-		fDestroyedUserData(NULL)
+		fDestroyedUserData(NULL),
+		fShown(false)
 	{
 	}
 
@@ -50,10 +55,43 @@ public:
 		 * native object is on its way out as early as possible. */
 		if (fDestroyedCallback != NULL)
 			fDestroyedCallback(fDestroyedUserData);
+
+		/* FIX (KNOWN_ISSUES.md #3/#5): explicit mono_thread_attach()
+		 * (hs_mono_thread_attach.h) means mono_domain_get() is no longer
+		 * NULL here, so mono_thread_current() itself is safe to call --
+		 * but calling a REAL mono_thread_detach() is NOT: two
+		 * independent, 100%-reproducible failure modes were found on
+		 * real hardware (both gdb-confirmed), depending on whether this
+		 * window's thread ever ran BView::Draw(): a fatal STATE_BLOCKING
+		 * abort for windows that drew (Draw()'s own app_server IPC
+		 * leaves the thread in Mono's cooperative-GC blocking state,
+		 * unbalanced, and mono_thread_detach() then tries to enter that
+		 * same state again), and -- discovered only after that first
+		 * failure mode was worked around -- a corrupted internal Mono
+		 * hash table for windows that never drew (no crash at the call
+		 * site, but mono-hash.c's "hash != NULL" assertion spins
+		 * forever at process shutdown, hanging the whole process with
+		 * exit code never returned). See KNOWN_ISSUES.md #3 for the
+		 * full writeup of both. Only the safe, no-op-capable
+		 * TLS-destructor-based detach (hs_mono_thread_detach.h) is used
+		 * here as a result, unconditionally, regardless of drawing --
+		 * it doesn't silence the benign "Failed aborting id" warning
+		 * (mono_thread_detach_if_exiting() is always a no-op for these
+		 * threads, also documented in KNOWN_ISSUES.md #3), but it is
+		 * the only detach-adjacent call proven safe in every
+		 * configuration tested. */
+		if (fShown)
+			hs_internal::MarkThreadForMonoDetachOnExit();
 	}
 
 	virtual void MessageReceived(BMessage* message)
 	{
+		/* FIX (KNOWN_ISSUES.md #3/#5): see hs_mono_thread_attach.h --
+		 * must run before the first delegate invocation below, on every
+		 * call, on whatever thread this is (usually a no-op after the
+		 * first). */
+		hs_internal::EnsureThreadAttached();
+
 		if (fMessageReceivedCallback != NULL) {
 			fMessageReceivedCallback(fMessageReceivedUserData,
 				static_cast<hs_handle>(message));
@@ -64,6 +102,9 @@ public:
 
 	virtual bool QuitRequested()
 	{
+		/* FIX (KNOWN_ISSUES.md #3/#5): see hs_mono_thread_attach.h. */
+		hs_internal::EnsureThreadAttached();
+
 		if (fQuitRequestedCallback != NULL)
 			return fQuitRequestedCallback(fQuitRequestedUserData) != 0;
 		return BWindow::QuitRequested();
@@ -90,6 +131,14 @@ public:
 		fDestroyedUserData = userData;
 	}
 
+	/* FIX (KNOWN_ISSUES.md #3/#5): set from hs_window_show()'s first
+	 * call, so the destructor knows whether this window's own thread
+	 * ever actually ran. */
+	void MarkShown()
+	{
+		fShown = true;
+	}
+
 private:
 	hs_window_message_received_callback	fMessageReceivedCallback;
 	void*									fMessageReceivedUserData;
@@ -97,6 +146,7 @@ private:
 	void*									fQuitRequestedUserData;
 	hs_window_destroyed_callback			fDestroyedCallback;
 	void*									fDestroyedUserData;
+	bool									fShown;
 };
 
 
@@ -187,6 +237,7 @@ void hs_window_show(hs_handle window)
 	 * thread (see hs_window.h's "THE THREAD DOESN'T EXIST YET" note) --
 	 * nothing special to do here, BWindow::Show() already handles both
 	 * the first-call and subsequent-call cases correctly on its own. */
+	static_cast<HSWindow*>(window)->MarkShown();
 	static_cast<HSWindow*>(window)->Show();
 }
 
