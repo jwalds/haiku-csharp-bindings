@@ -50,6 +50,14 @@ empty variable to your own native directory finds *only* your own directory
 needs. Spelling out the full path explicitly works the same whether you are
 sitting at Haiku's own Terminal or running this over SSH.)
 
+By default, quitting a window or application prints a benign, non-fatal
+"Failed aborting id" warning from Mono on some runs -- harmless, but if
+you want a fully silent shutdown, set `MONO_THREADS_SUSPEND=preemptive`
+in the environment before launching `mono` (works with any command above,
+e.g. `MONO_THREADS_SUSPEND=preemptive LIBRARY_PATH=... mono Sample.exe`).
+See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md#3-benign-failed-aborting-id-mono-warning-on-window-quit-two-crash-prone-obvious-fixes-and-the-real-one)
+for the full investigation and hardware verification behind this recipe.
+
 Run the test suite the same way, with `Tests.exe` in place of `Sample.exe`
 (`mono Tests.exe`, or `mono Tests.exe <substring>` to run just one
 module). See [details.md](details.md#running-sampleexe-what-it-demonstrates-and-expected-output)

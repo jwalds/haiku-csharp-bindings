@@ -80,8 +80,16 @@ public:
 		 * threads, also documented in KNOWN_ISSUES.md #3), but it is
 		 * the only detach-adjacent call proven safe in every
 		 * configuration tested. */
-		if (fShown)
-			hs_internal::MarkThreadForMonoDetachOnExit();
+		if (fShown) {
+			/* hs_mono_thread_attach.h's RealDetachIsSafe(): a real detach
+			 * is only safe under MONO_THREADS_SUSPEND=preemptive (see that
+			 * header for the full investigation); otherwise fall back to
+			 * the always-safe no-op below. */
+			if (hs_internal::RealDetachIsSafe())
+				mono_thread_detach(mono_thread_current());
+			else
+				hs_internal::MarkThreadForMonoDetachOnExit();
+		}
 	}
 
 	virtual void MessageReceived(BMessage* message)

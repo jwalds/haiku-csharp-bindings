@@ -366,65 +366,146 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
      (or otherwise keeping the display active) before an unattended test
      run resolves it immediately and is not evidence of any code bug.
 
+6. **ADAPTIVE FIX (shipped, on top of fix attempt 4) -- a real
+   `mono_thread_detach()`, but only when `MONO_THREADS_SUSPEND=preemptive`
+   is set, detected at runtime via plain `getenv()`.** Fix attempt 5 ruled
+   out a real detach *unconditionally*; it did not rule out a real detach
+   *always*. Two more threads were pulled on this session, both confirmed
+   on real hardware before any shipped code changed:
+
+   - **Prior art:** a search of other Mono-embedding projects turned up
+     `mono/mono#20283`, which documents a related macOS deadlock in
+     Mono's cooperative-suspend GC worked around by setting
+     `MONO_THREADS_SUSPEND=preemptive`. Both of fix attempt 5's failure
+     modes (the `STATE_BLOCKING` double-transition `g_error`, and the
+     mono-hash corruption) are specific to Mono's cooperative-suspend
+     "blocking region" state machine -- the preemptive suspend
+     implementation doesn't use that machinery the same way, making it a
+     plausible fix for this port too, not just a coincidence from an
+     unrelated platform.
+   - **Tested directly, via A/B experiment (uncommitted scaffolding,
+     fully reverted afterward):** with `MONO_THREADS_SUSPEND=preemptive`
+     set and a real `mono_thread_detach(mono_thread_current())` call in
+     place of `MarkThreadForMonoDetachOnExit()` in both destructors, 6
+     consecutive full `Tests.exe` runs (149 passed, 0 failed, every
+     time) plus 150 `HammerProbe.exe` show/quit cycles across both
+     drawing and non-drawing windows -- zero crashes, zero hangs, and the
+     "Failed aborting id" warning never appeared once. The identical
+     build with the env var *unset* reproduced fix attempt 5's original
+     failures exactly (same `g_error` for drawing windows, same
+     mono-hash hang for non-drawing ones) -- confirming the env var,
+     specifically, is what makes the real detach safe, not some other
+     change.
+   - **Auto-detecting preemptive mode from inside the shim, so consumers
+     don't have to trust a hand-set env var to matter:** the obvious
+     candidate, `mono_thread_get_coop_aware()`/`mono_thread_set_coop_
+     aware()` (exported by `libmonosgen-2.0.so`, found via `nm -D`), was
+     investigated as a way to *query* Mono's active suspend policy at
+     runtime. `gdb` disassembly of the real binary (not source-guessing
+     -- `mono-threads-coop.c`, lines 777/792 per its own DWARF line
+     info) showed these are a **per-thread** atomic flag on the calling
+     thread's `mono_thread_info` struct (offset `0x364`, read with a
+     `lock xadd`, set with a `lock cmpxchg` loop) -- unrelated to the
+     global, process-wide suspend-policy choice Mono makes once at
+     startup. Confirmed dead end; there is no supported Mono API to
+     query `MONO_THREADS_SUSPEND` after the fact.
+   - **What shipped instead:** plain libc `getenv("MONO_THREADS_SUSPEND")`,
+     called from inside this shim itself. A temporary on-hardware probe
+     (a `getenv()` call plus an `fprintf` added to `hs_application_
+     create()`, since reverted) confirmed it reliably and unmodified
+     reflects whatever was set before `mono` launched -- `mono`'s own
+     launcher parses this env var once, at process startup, before any
+     embedded/loaded library code (including this shim) ever runs, so
+     there's no race or staleness concern. `native/src/hs_mono_thread_
+     attach.h`'s new `RealDetachIsSafe()` reads it exactly once per
+     process (a C++11 function-local `static`, the same thread-safe
+     exactly-once pattern already used by `CachedRootDomain()`) and
+     matches only the exact string `"preemptive"` -- `"hybrid"` mode was
+     not tested and is deliberately not treated as safe by this check.
+     `~HSWindow()` and `~HSApplication()` now branch on it: a real
+     `mono_thread_detach(mono_thread_current())` when true, and the
+     existing safe `MarkThreadForMonoDetachOnExit()` fallback when false
+     or unset.
+   - **Verified on the actual shipped code** (not just the earlier
+     scratch experiment): a full clean rebuild, then `Tests.exe` (3 runs)
+     and `HammerProbe.exe` (50-100 cycles) under each of the two modes.
+     Default/unset: 149/149 passing every run, the pre-existing benign
+     warning appearing in roughly its usual proportion, zero crashes --
+     i.e. bit-for-bit the same behavior as fix attempt 4 alone, no
+     regression. `MONO_THREADS_SUSPEND=preemptive`: 149/149 passing every
+     run, zero crashes, zero hangs, and the warning did not appear in
+     any run. A temporary branch-taken probe (`fprintf` in each arm of
+     the new `if`, reverted before commit) additionally confirmed the
+     *correct* branch is actually taken in each mode -- the safe fallback
+     ran under the default mode and never under preemptive mode, and the
+     real detach ran under preemptive mode and never under the default
+     mode -- ruling out the possibility that both arms just happen to
+     behave identically for some unrelated reason.
+
 **Not yet known:** why `mono_thread_detach_if_exiting()` (attempt 3)
 always returns `FALSE` for these threads even when called from a
 genuinely-correct, confirmed-at-real-exit call site, and the exact
-mechanism behind fix attempt 5's mono-hash corruption (only that it's
-real, reliably triggered by a real detach call, and matches a failure
-mode issue #5 already observed occurring spontaneously). Both would need
-a real debugger stepping through `libmonosgen-2.0.so`'s thread/GC/hash
-internals with the domain-attach fix already active, which was not
-pursued further once fix attempt 5 confirmed that path isn't safe to
-ship regardless of the answer -- there is no version of "call `mono_
-thread_detach()` for real" proven safe to use here, so understanding
-exactly why is a research question, not a blocker for anything real
-apps built on this binding need.
+mechanism behind fix attempt 5's mono-hash corruption under the *default*
+cooperative suspend mode (only that it's real, reliably triggered by a
+real detach call there, and matches a failure mode issue #5 already
+observed occurring spontaneously). Understanding either in full would
+need a real debugger stepping through `libmonosgen-2.0.so`'s thread/GC/
+hash internals -- not pursued further, since fix attempt 6 gives every
+consumer a proven-safe way to get a real detach today (by setting
+`MONO_THREADS_SUSPEND=preemptive`), and the default mode's fallback path
+is unconditionally safe regardless of the answer. `mono_thread_get_coop_
+aware()`/`mono_thread_set_coop_aware()`'s real semantics (a per-thread
+flag, not a suspend-policy query -- see fix attempt 6) are now fully
+understood via `gdb` disassembly, closing that one open question from
+earlier in this investigation.
 
-**Current handling:** the domain-attach fix (fix attempt 4) is shipped
--- `native/src/hs_mono_thread_attach.h` is wired into every native-
->managed callback trampoline in `hs_window.cpp` and `hs_application.cpp`,
-and `hs_application_create()` caches the root domain. This is a real,
-hardware-verified fix for the original SIGSEGV crash (attempts 1-2) and
-plausibly for issue #5's independently-observed SIGSEGV too (see that
-issue's update). On top of that, `~HSWindow()`/`~HSApplication()`
-unconditionally call `hs_internal::MarkThreadForMonoDetachOnExit()`
-(`native/src/hs_mono_thread_detach.h`, new, committed -- the safe,
-pthread-TLS-destructor-based wrapper around `mono_thread_detach_if_
-exiting()` from fix attempt 3) when the window was ever shown / the app
-was ever run. This does **not** silence the benign "Failed aborting id"
-warning this issue is named for -- attempt 3 already showed that call is
-always a no-op for these threads -- but it's proven safe in every
-configuration tested (`HammerProbe.exe`, `Tests.exe`, both individually
-and combined), unlike either flavor of a real detach (fix attempt 5).
-The net effect versus where this binding started: calling into managed
-code from any Haiku-spawned thread (`BWindow`'s or `BApplication`'s own
-message loop) no longer crashes at all, in any tested configuration --
-only this one cosmetic, harmless, non-deterministic warning remains, and
-it is understood in full detail (see "Confirmed root cause" above) even
-though it isn't eliminated.
+**Current handling:** the domain-attach fix (fix attempt 4) is always
+shipped -- `native/src/hs_mono_thread_attach.h` is wired into every
+native->managed callback trampoline in `hs_window.cpp` and
+`hs_application.cpp`, and `hs_application_create()` caches the root
+domain. On top of that, `~HSWindow()`/`~HSApplication()` now call
+`hs_internal::RealDetachIsSafe()` (fix attempt 6) to choose between a
+real `mono_thread_detach(mono_thread_current())` and the safe
+`hs_internal::MarkThreadForMonoDetachOnExit()` fallback
+(`native/src/hs_mono_thread_detach.h`, the pthread-TLS-destructor-based
+wrapper around `mono_thread_detach_if_exiting()` from fix attempt 3).
+By default (no env var set, i.e. every consumer who doesn't opt in),
+behavior is unchanged from fix attempt 4 alone: no crashes, no hangs, and
+the benign "Failed aborting id" warning may still appear non-
+deterministically. A consumer who sets `MONO_THREADS_SUSPEND=preemptive`
+before launching `mono` gets a real detach on every window/application
+teardown instead, and with it a fully silent shutdown -- verified across
+multiple full test-suite and `HammerProbe.exe` runs, with zero
+regressions found in either mode. The net effect versus where this
+binding started: calling into managed code from any Haiku-spawned thread
+no longer crashes in any tested configuration, and the one remaining
+cosmetic symptom is now fully eliminable, opt-in, with a one-line env
+var and no source change on the consumer's end.
 
-**Where to pick this up:** eliminating the warning itself (not just the
-crashes around it) would require either (a) understanding why `mono_
-thread_detach_if_exiting()` is always a no-op here well enough to find a
-call site or condition where it isn't, or (b) understanding fix attempt
-5's mono-hash corruption well enough to fix *that*, so a real detach
-becomes safe to ship. Both need a real debugger session stepping through
-`libmonosgen-2.0.so` itself (gdb is installed and DOES have real symbols
-for this build, once the fault or breakpoint is inside code that's
-actually been loaded -- see fix attempt 4's own discovery) rather than
-another externally-observed-behavior experiment; several of those have
-now been run and each one answered a narrower question than it raised.
-Given the warning is confirmed non-fatal and now the *only* remaining
-symptom in this whole area, this is a coloring-in problem, not a
-blocker.
+**Where to pick this up:** eliminating the warning under the *default*
+suspend mode too (rather than requiring the `MONO_THREADS_SUSPEND=
+preemptive` opt-in) would still require either (a) understanding why
+`mono_thread_detach_if_exiting()` is always a no-op here well enough to
+find a call site or condition where it isn't, or (b) understanding fix
+attempt 5's mono-hash corruption well enough to fix *that* under
+cooperative suspend specifically. Both need a real debugger session
+stepping through `libmonosgen-2.0.so` itself (gdb is installed and DOES
+have real symbols for this build -- see fix attempt 4's own discovery,
+and fix attempt 6's coop-aware disassembly) rather than another
+externally-observed-behavior experiment. Given the warning is confirmed
+non-fatal, fully understood, and now fully eliminable for any consumer
+willing to set one env var, this is a coloring-in problem, not a
+blocker, for either the default-mode case or anything else in this area.
 
 **Where documented in code:** `native/src/hs_mono_thread_attach.h` (the
-domain-attach fix itself, and fix attempt 5's ruled-out real-detach
-finding, in detail) and `native/src/hs_mono_thread_detach.h` (the safe
-fallback) -- both files' own header comments. `hs_window.cpp`'s
-`~HSWindow()` and `hs_application.cpp`'s `~HSApplication()` each carry a
-shorter version of the same story at their own call sites. `HammerProbe.cs`
-(repo root) is the standalone stress-test tool referenced throughout.
+domain-attach fix, fix attempt 5's ruled-out unconditional-real-detach
+finding, and fix attempt 6's adaptive `RealDetachIsSafe()` plus the full
+`getenv()`-vs-`mono_thread_get_coop_aware()` reasoning, all in detail)
+and `native/src/hs_mono_thread_detach.h` (the safe fallback) -- both
+files' own header comments. `hs_window.cpp`'s `~HSWindow()` and
+`hs_application.cpp`'s `~HSApplication()` each carry a shorter version of
+the same story at their own call sites. `HammerProbe.cs` (repo root) is
+the standalone stress-test tool referenced throughout.
 
 ---
 
@@ -531,6 +612,16 @@ Haiku-port combination (not a one-off fluke), which is independently
 useful context for this entry even though the *trigger* found there
 (a real detach call) is never exercised by any code path that could
 have produced this entry's original run-4 crash.
+
+A still-later session (issue #3's fix attempt 6) shipped a way to
+make a real `mono_thread_detach()` safe after all, opt-in via
+`MONO_THREADS_SUSPEND=preemptive` -- and re-ran the same class of
+verification (`Tests.exe`, `HammerProbe.exe`) with that real detach
+actually exercised, under that mode, with zero mono-hash corruption
+and zero SIGSEGVs of any kind. That's additional, independent
+evidence for this entry's own conclusion above -- the hash-corruption
+phenomenon is specific to a real detach happening under the *default*
+cooperative suspend mode, not to real detaches in general.
 
 **Current handling:** none needed for correctness -- no single test's
 PASS/FAIL result was ever wrong because of this; the crash happens during

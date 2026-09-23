@@ -49,8 +49,16 @@ public:
 	 * exiting -- see hs_application.h's ownership note. */
 	virtual ~HSApplication()
 	{
-		if (fRun)
-			hs_internal::MarkThreadForMonoDetachOnExit();
+		if (fRun) {
+			/* hs_mono_thread_attach.h's RealDetachIsSafe(): a real detach
+			 * is only safe under MONO_THREADS_SUSPEND=preemptive (see that
+			 * header for the full investigation); otherwise fall back to
+			 * the always-safe no-op below. */
+			if (hs_internal::RealDetachIsSafe())
+				mono_thread_detach(mono_thread_current());
+			else
+				hs_internal::MarkThreadForMonoDetachOnExit();
+		}
 	}
 
 	virtual void MessageReceived(BMessage* message)
