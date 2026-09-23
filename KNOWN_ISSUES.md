@@ -145,6 +145,14 @@ build in use -- not guessed):
   becomes signaled while still present in the `threads` table -- i.e. if
   our thread were ever misclassified as foreground, this would be a hard
   crash on every quit, not an occasional warning.
+- Not window-specific: a later session (see fix attempt 3 below)
+  confirmed `BApplication`'s own message-loop thread (spawned by
+  `hs_application_run_and_wait()`'s `Run()` call) independently produces
+  the identical warning -- `HSApplication` had no destructor at all
+  before that investigation. `ApplicationTests.cs` is the only test that
+  ever exercises a full `Run()` cycle (issue #1), so the already-
+  documented ~2-in-7 rate below is plausibly explained by either
+  thread, not only a window's.
 
 **Confirmed non-fatal:** reproduced independently via `hey` (both an
 app-level `QUIT` and a window-targeted `let Window 0 do QUIT`) in addition
@@ -154,7 +162,7 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
 -- and it never appeared across two full `Tests.exe` runs, even though
 `WindowTests` also shows and quits a window in the same process.
 
-**Fix attempts -- both crash, do not ship either of these:**
+**Fix attempts -- the first two crash; do not ship any of these:**
 
 1. *Call `mono_thread_detach(mono_thread_current())` cold, as the last
    line of `~HSWindow()`, guarded by "only if this window was ever shown"
@@ -198,26 +206,106 @@ roughly 2 of 7 automated attempts reproduced the warning, the rest didn't
    self-quit sequence, on a Haiku-spawned foreign thread) appears to be
    unsafe outright in this Mono build, for a reason not yet identified.
 
+3. *Call `mono_thread_detach_if_exiting()` (`mono/metadata/threads.h`)
+   instead of `mono_thread_detach(mono_thread_current())` -- a different
+   embedding API that takes no `MonoThread*` argument at all, so it
+   can't hit the `mono_thread_current()` allocation path that crashed
+   attempts 1-2.* Verified against the real header (`/boot/system/
+   develop/headers/mono-2.0/mono/metadata/threads.h`) and confirmed
+   exported by the actual `libmonosgen-2.0.so` in use (`nm -D`) before
+   writing any code. Tried in three call-site variants, on real
+   hardware, in a later session -- none of them crash, but none of them
+   fix anything either:
+   - Called directly from `~HSWindow()`, guarded the same way as
+     attempt 1 (`fShown`), and from a new `~HSApplication()` (added
+     this session -- see the "not window-specific" bullet above)
+     guarded by a new `fRun`. Survived a dedicated 30- and 50-
+     iteration `HammerProbe.exe` (a standalone, non-`Tests.exe`
+     scratch program that show/quit-cycles many windows in one
+     process, to multiply this non-deterministic symptom's chances of
+     appearing) across 4 separate runs -- 180 total show/quit/destroy
+     cycles, zero crashes: a real, hardware-confirmed safety
+     improvement over attempts 1-2. But a temporary `fprintf` on its
+     return value showed it returns `FALSE` (a no-op) on every single
+     call, every run: this destructor runs during `task_looper()`'s
+     own `delete this`, before the underlying OS thread function has
+     actually returned, and Mono doesn't consider the thread
+     "exiting" yet at that point.
+   - Suspecting the timing was the problem, registered a real
+     `pthread_key_t` (`pthread_key_create`) whose destructor calls
+     `mono_thread_detach_if_exiting()`, and had `~HSWindow()`/
+     `~HSApplication()` only ever call `pthread_setspecific()` --
+     never the Mono function directly. A dedicated, Mono-free scratch
+     probe (`probe_tls_destructor.cpp` -- pure BeAPI + pthread, no
+     C#/Mono involved at all) confirmed on hardware that Haiku's
+     libroot *does* invoke a `pthread_key_t` destructor for a
+     `BLooper`-spawned thread (created via `spawn_thread()`/
+     `resume_thread()`, not `pthread_create()`) at that thread's
+     genuine OS-level exit -- same thread ID, firing microseconds
+     after `task_looper()` returns -- proving the mechanism itself
+     works on this OS. Wired into the real shim and rerun: the TLS
+     destructor reliably fires (confirmed via `fprintf`, both for a
+     window's thread and, separately, `HSApplication`'s own thread) at
+     what's unambiguously each thread's actual exit.
+     `mono_thread_detach_if_exiting()` still returns `FALSE` every
+     time, from inside this genuinely-correct call site.
+   - Across 8 full `Tests.exe` runs with this variant in place, the
+     "Failed aborting id" warning still appeared in roughly the same
+     ~1-in-4 proportion this issue already documents below -- i.e.
+     this had no measurable effect on the symptom at all, consistent
+     with the function being a no-op here regardless of when it's
+     called.
+
 **Not yet known:** the actual mechanism inside `libmonosgen-2.0` that
-makes `mono_thread_current()` crash here specifically. Pinning it down
-further would need real debugging tools this environment doesn't have
-readily available -- gdb with matching debug symbols for `libmonosgen`
-and `libbe` (this Haiku port ships neither), or a debug build of Mono
-itself.
+makes `mono_thread_current()` crash here specifically, or why
+`mono_thread_detach_if_exiting()` -- confirmed safe, confirmed reachable
+at each thread's genuine OS-level exit via a working `pthread_key_t`
+destructor -- still always returns `FALSE` for these threads. The
+leading theory after this investigation: `mono_thread_detach_if_
+exiting()` most likely checks a Mono-*internal* flag that only Mono's
+own thread-creation/exit machinery sets for threads it created itself
+(e.g. via `mono_thread_create()`), not a generic "is this OS thread
+actually exiting" fact -- which would mean no call-site timing fix can
+ever make it succeed for a foreign, implicitly-attached thread, and this
+whole embedding function may simply be the wrong tool for this job.
+Pinning that down for certain needs a real debugger stepping through
+`threads.c` inside `libmonosgen-2.0.so`, not another externally-observed
+return value.
 
 **Current handling:** left as the original warning-only behavior (no
 `mono_thread_detach()` call anywhere). `hs_window.cpp`/`hs_window.h` are
 unchanged from the version committed in
-`26b2d27` ("Add BWindow bindings ..."). Both fix attempts were fully
-reverted; nothing from this investigation is in the committed code except
-this write-up.
+`26b2d27` ("Add BWindow bindings ..."). All three fix attempts were
+fully reverted; nothing from this investigation is in the committed code
+except this write-up. Attempt 3's changes additionally touched
+`hs_application.cpp`/`native/Makefile` and a new (also reverted)
+`hs_mono_thread_detach.h` helper -- all three confirmed (via `md5sum`)
+byte-for-byte unchanged from before that investigation once reverted.
 
-**Where to pick this up:** anyone attempting this again should assume
+**Where to pick this up:** the original warning still applies to
 `mono_thread_current()`/`mono_thread_detach()` called bare from
-`hs_window.cpp` are unsafe from this call site until proven otherwise with
-a real debugger attached, not just by moving the call around and rerunning
-the test suite -- that's exactly what produced three different failures
-above without ever getting closer to a working fix.
+`hs_window.cpp` -- assume both are unsafe from this call site until
+proven otherwise with a real debugger attached. `mono_thread_detach_if_
+exiting()` is safe from any of the call sites tried so far, but three
+different variants of *when* to call it all converged on the same
+no-op, which is a different kind of dead end, not a timing puzzle still
+worth iterating on by guesswork.
+
+A real next step, not yet tried: this investigation found `gdb` (GNU
+gdb 17.2) *is* actually installed on this Haiku box (`/boot/system/
+bin/gdb`), contrary to what this entry previously assumed -- what's
+still missing is matching debug symbols for `libmonosgen`/`libbe`
+(`pkgman search debuginfo` finds neither package). Attach `gdb` to a
+running `Tests.exe` (or a dedicated show/quit-cycling scratch program
+like this session's `HammerProbe.exe`, not committed but trivial to
+recreate from this write-up) and either set a breakpoint directly on
+the exported `mono_thread_detach_if_exiting` symbol (visible via `nm
+-D libmonosgen-2.0.so` even without debug info) to step through its
+actual logic without symbols, or at minimum catch issue #5's SIGSEGV
+with a real native backtrace instead of only externally-observed
+symptoms -- gdb without debug symbols still resolves return addresses
+to the nearest exported function name, which is more than any attempt
+so far has had.
 
 ---
 
@@ -286,8 +374,10 @@ COUNT Window` and a stale-crash-dialog check learned from issue #4's own
   that appeared afterward, at line 3475 of that same log.
 
 **Not yet known:** same caveat as issues #3/#4 -- real debugging (`gdb`
-with matching symbols for `libmonosgen`/`libbe`, neither shipped by this
-Haiku port) would be needed to say whether this is literally the same
+is actually installed on this Haiku box, per issue #3's later session,
+but matching debug symbols for `libmonosgen`/`libbe` are not, and this
+Haiku port ships neither package) would be needed to say whether this is
+literally the same
 underlying defect as issue #3 manifesting more severely, or a related but
 distinct fault in Mono's thread-interruption path specifically. Not
 chased further here, consistent with issues #3/#4's own conclusion that
@@ -458,8 +548,9 @@ real, debuggable fault given enough time instead of spinning forever.
 
 **Not yet known:** the exact mechanism -- same caveat as issue #3: real
 debugging (a `gdb` attach with matching symbols) would be needed to see
-what the hung process's threads are actually doing, and that tooling isn't
-available in this environment. Given the "UPDATE" above, this is now a
+what the hung process's threads are actually doing; `gdb` itself is
+installed on this Haiku box (see issue #3's later session), but matching
+debug symbols for `libmonosgen`/`libbe` are not. Given the "UPDATE" above, this is now a
 lower-priority curiosity about `ViewTests.cs`'s specific pattern (and
 possibly about `Application` instances that are constructed and `Show()`
 a `Window` but never themselves `Run()`) rather than a blocker for the
