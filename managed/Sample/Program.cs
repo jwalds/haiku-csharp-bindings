@@ -523,10 +523,82 @@ public class DemoListView : ListView
 	}
 }
 
+/*
+ * Three small buttons demonstrating the ListView completeness pass:
+ * MoveUp/MoveDown (SwapItems, operating on the current single
+ * selection) and Sort A-Z (Sort, operating on the whole list). Plain
+ * siblings of DemoListView under DemoWindow, not children of it --
+ * real BeAPI does not use a BListView to host arbitrary child views,
+ * so this binding has never tried adding one via a ListView's own
+ * AddChild.
+ */
+public class DemoListMoveUpButton : Button
+{
+	private readonly DemoListView _listView;
+
+	public DemoListMoveUpButton(DemoListView listView)
+		: base(new Rect(20, 705, 130, 730), "demo move up", "Move Up")
+	{
+		_listView = listView;
+	}
+
+	protected override void OnClick()
+	{
+		int selected = _listView.CurrentSelection();
+		if (selected <= 0) {
+			Console.WriteLine("[13] Move Up: no selection, or already at the top -- nothing to do.");
+			return;
+		}
+		_listView.SwapItems(selected, selected - 1);
+		_listView.Select(selected - 1);
+		Console.WriteLine("[13] Move Up: swapped index " + selected + " with " + (selected - 1) + ".");
+	}
+}
+
+public class DemoListMoveDownButton : Button
+{
+	private readonly DemoListView _listView;
+
+	public DemoListMoveDownButton(DemoListView listView)
+		: base(new Rect(140, 705, 250, 730), "demo move down", "Move Down")
+	{
+		_listView = listView;
+	}
+
+	protected override void OnClick()
+	{
+		int selected = _listView.CurrentSelection();
+		if (selected < 0 || selected >= _listView.CountItems - 1) {
+			Console.WriteLine("[13] Move Down: no selection, or already at the bottom -- nothing to do.");
+			return;
+		}
+		_listView.SwapItems(selected, selected + 1);
+		_listView.Select(selected + 1);
+		Console.WriteLine("[13] Move Down: swapped index " + selected + " with " + (selected + 1) + ".");
+	}
+}
+
+public class DemoListSortButton : Button
+{
+	private readonly DemoListView _listView;
+
+	public DemoListSortButton(DemoListView listView)
+		: base(new Rect(260, 705, 360, 730), "demo sort", "Sort A-Z")
+	{
+		_listView = listView;
+	}
+
+	protected override void OnClick()
+	{
+		_listView.Sort();
+		Console.WriteLine("[13] Sort A-Z: list re-sorted ascending by item text.");
+	}
+}
+
 public class DemoWindow : Window
 {
 	public DemoWindow()
-		: base(new Rect(100, 100, 500, 820), "Haiku C# Bindings Demo",
+		: base(new Rect(100, 100, 500, 860), "Haiku C# Bindings Demo",
 			WindowLook.Titled, WindowFeel.Normal, WindowFlags.QuitOnWindowClose)
 	{
 		AddChild(new DemoView());
@@ -545,7 +617,11 @@ public class DemoWindow : Window
 
 		AddChild(new DemoSlider());
 		AddChild(new DemoColorControl());
-		AddChild(new DemoListView());
+		DemoListView listView = new DemoListView();
+		AddChild(listView);
+		AddChild(new DemoListMoveUpButton(listView));
+		AddChild(new DemoListMoveDownButton(listView));
+		AddChild(new DemoListSortButton(listView));
 	}
 
 	protected override void OnDestroyed()

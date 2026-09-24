@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Haiku.App;
 
@@ -31,12 +32,16 @@ namespace Haiku.Interface
 	 *
 	 * SCOPE: add/insert/remove/read/replace text items, CountItems,
 	 * ListType, single- and multi-selection (Select/Deselect/
-	 * DeselectAll/IsItemSelected/CurrentSelection), and the
-	 * SelectionChanged()/Invoke() callback pair -- see hs_list_view.h's
-	 * own SCOPE note for what's deliberately not covered (custom
-	 * BListItem subclasses, BOutlineListView, drag-and-drop reordering,
-	 * SortItems/SwapItems/MoveItem/ReplaceItem/AddList, ItemFrame/
-	 * DoForEach, BScrollView wrapping).
+	 * DeselectAll/IsItemSelected/CurrentSelection), the
+	 * SelectionChanged()/Invoke() callback pair, and -- from a later
+	 * completeness pass -- SwapItems/MoveItem/bulk RemoveItems, a
+	 * fixed ascending/descending text Sort, range Select/
+	 * DeselectExcept, ItemFrame/IndexOfPoint hit-testing, IsEmpty,
+	 * ScrollTo(index)/ScrollToSelection, and a pure-managed AddItems
+	 * convenience -- see hs_list_view.h's own SCOPE note for what's
+	 * still deliberately not covered (custom BListItem subclasses,
+	 * BOutlineListView, drag-and-drop reordering, ReplaceItem, real
+	 * AddList, DoForEach, a managed SortItems comparator callback).
 	 *
 	 * TWO EVENTS: OnSelectionChanged fires whenever the current
 	 * selection changes -- confirmed on hardware to fire for a plain
@@ -220,6 +225,160 @@ namespace Haiku.Interface
 				CheckNotConsumed();
 				Native.hs_list_view_set_list_type(_handle, (uint)value);
 			}
+		}
+
+		/*
+		 * --- Completeness pass below -- see this class's own header
+		 * comment and hs_list_view.h's for the full design rationale. ---
+		 */
+
+		/// <summary>
+		/// Swaps the items at indices a and b in place. Returns false if
+		/// either index is out of range.
+		/// </summary>
+		public bool SwapItems(int a, int b)
+		{
+			CheckNotConsumed();
+			return Native.hs_list_view_swap_items(_handle, a, b);
+		}
+
+		/// <summary>
+		/// Moves the item at index from to index to, shifting every item
+		/// between them to make room. Returns false if either index is
+		/// out of range.
+		/// </summary>
+		public bool MoveItem(int from, int to)
+		{
+			CheckNotConsumed();
+			return Native.hs_list_view_move_item(_handle, from, to);
+		}
+
+		/// <summary>
+		/// Removes and deletes up to count items starting at index
+		/// (fewer if the list is shorter than index + count). Returns
+		/// the number of items actually removed. See
+		/// <see cref="RemoveItemAt"/>'s own remarks on ownership -- this
+		/// binding deletes the underlying items itself.
+		/// </summary>
+		public int RemoveItems(int index, int count)
+		{
+			CheckNotConsumed();
+			return Native.hs_list_view_remove_items(_handle, index, count);
+		}
+
+		/// <summary>
+		/// Sorts every item in place by its text -- a plain, non-locale-
+		/// aware ordinal comparison, ascending unless
+		/// <paramref name="ascending"/> is false. Does not fire
+		/// <see cref="OnSelectionChanged"/> -- matches real BeAPI, whose
+		/// own SortItems() clears the selection without invoking
+		/// SelectionChanged().
+		/// </summary>
+		public void Sort(bool ascending = true)
+		{
+			CheckNotConsumed();
+			Native.hs_list_view_sort(_handle, ascending);
+		}
+
+		/// <summary>
+		/// Selects every index from <paramref name="from"/> to
+		/// <paramref name="to"/> inclusive (either order), extending the
+		/// current selection instead of replacing it when extend is true
+		/// (only meaningful when <see cref="ListType"/> is
+		/// <see cref="ListViewType.MultipleSelection"/>). Fires
+		/// <see cref="OnSelectionChanged"/>, same as the single-index
+		/// <see cref="Select(int, bool)"/> overload above.
+		/// </summary>
+		public void Select(int from, int to, bool extend = false)
+		{
+			CheckNotConsumed();
+			Native.hs_list_view_select_range(_handle, from, to, extend);
+		}
+
+		/// <summary>
+		/// Deselects every currently-selected index except those from
+		/// exceptFrom to exceptTo inclusive.
+		/// </summary>
+		public void DeselectExcept(int exceptFrom, int exceptTo)
+		{
+			CheckNotConsumed();
+			Native.hs_list_view_deselect_except(_handle, exceptFrom, exceptTo);
+		}
+
+		/// <summary>
+		/// The on-screen frame (in this list view's own coordinate
+		/// space) of the item at index. Returns an all-zero Rect if
+		/// index is out of range -- also all-zero (hardware-confirmed)
+		/// if this list view has not yet been added to a window, since
+		/// item height is only measured against a real owner once
+		/// attached. Call this after <see cref="ViewBase.AddChild"/>
+		/// (or after the window that will contain it is showing), not
+		/// before.
+		/// </summary>
+		public Rect ItemFrame(int index)
+		{
+			CheckNotConsumed();
+			HsRect native;
+			Native.hs_list_view_item_frame(_handle, index, out native);
+			return new Rect(native.Left, native.Top, native.Right, native.Bottom);
+		}
+
+		/// <summary>
+		/// The index of the item whose frame contains point (in this
+		/// list view's own coordinate space), or -1 if point falls
+		/// outside every item's frame -- real BeAPI's own IndexOf(BPoint)
+		/// hit-test. Same attachment requirement as
+		/// <see cref="ItemFrame"/> above (always returns -1 before this
+		/// list view is added to a window). This ListView type has no
+		/// mouse callbacks of its own (see this class's own comment), so
+		/// point must come from elsewhere -- e.g. a coordinate derived
+		/// from <see cref="ItemFrame"/>, or supplied by the caller some
+		/// other way.
+		/// </summary>
+		public int IndexOfPoint(Point point)
+		{
+			CheckNotConsumed();
+			HsPoint native = new HsPoint { X = point.X, Y = point.Y };
+			return Native.hs_list_view_index_of_point(_handle, native);
+		}
+
+		public bool IsEmpty
+		{
+			get
+			{
+				CheckNotConsumed();
+				return Native.hs_list_view_is_empty(_handle);
+			}
+		}
+
+		/// <summary>Scrolls so the item at index is visible.</summary>
+		public void ScrollTo(int index)
+		{
+			CheckNotConsumed();
+			Native.hs_list_view_scroll_to_index(_handle, index);
+		}
+
+		/// <summary>Scrolls so the current selection is visible.</summary>
+		public void ScrollToSelection()
+		{
+			CheckNotConsumed();
+			Native.hs_list_view_scroll_to_selection(_handle);
+		}
+
+		/// <summary>
+		/// Pure-managed convenience, not a separate native call: appends
+		/// every string in items to the end of the list, in order, by
+		/// looping <see cref="AddItem(string)"/>. Real BeAPI's own bulk
+		/// AddList(BList*) is out of scope for this binding (see
+		/// hs_list_view.h's own SCOPE note) -- this achieves the same
+		/// net effect for the common case without needing a BList
+		/// marshaling story.
+		/// </summary>
+		public void AddItems(IEnumerable<string> items)
+		{
+			CheckNotConsumed();
+			foreach (string item in items)
+				AddItem(item);
 		}
 
 		/// <summary>

@@ -1288,22 +1288,138 @@ scrollbar without one) are real `BListView`/`BListItem` API this binding
 does not expose, a deliberate scope decision (captured in
 `hs_list_view.h`'s own header comment), not an oversight.
 
-**Verification.** `ListViewTests.cs` (module `BListView`, 15 tests)
-covers construction/geometry, item add/insert/remove/text
+### Completeness pass: reordering, sorting, range selection, and hit-testing
+
+Following the "everything in one big pass" scope this slice's session
+was asked to take, eleven real `BListView` calls named as deferred in
+the Scope paragraph above were added in one pass: `SwapItems`,
+`MoveItem`, bulk `RemoveItems`, `SortItems`, range
+`Select(from, to, extend)`, `DeselectExcept`, `ItemFrame`,
+`IndexOf(BPoint)` (hit-testing), `IsEmpty`, and the index- and
+selection-based `ScrollTo`/`ScrollToSelection` overloads (distinct from
+`BView`'s own point-based `ScrollTo`, already wrapped elsewhere in this
+binding). Every one of them was hardware-verified before any shim code
+relied on it, per this binding's standing rule.
+
+**`SortItems`'s comparator receives a pointer to a `BListItem*` slot,
+not a `BListItem*` directly -- confirmed via `gdb` disassembly of the
+real installed `libbe.so`, not guessed.** This build's `libbe.so` carries
+no debug symbols for `BListView`/`BList` (unlike `libmonosgen-2.0.so`,
+which does), but static disassembly of `BList::SortItems` still showed
+it calling straight into libc's `qsort(base, count, elemsize=8, cmp)`
+over its own internal `BListItem*[]` storage -- the textbook
+qsort-over-pointer-array shape, where each `const void*` argument the
+comparator receives is the address of one array slot, i.e. a
+`BListItem* const*`, requiring a double dereference to reach the actual
+item. `hs_list_view.cpp`'s own `CompareItemsAscending`/
+`CompareItemsDescending` cast accordingly
+(`static_cast<const BStringItem*>(*(BListItem* const*)a)`), and
+`SortAscendingOrdersAlphabetically`/`SortDescendingReversesOrder`
+confirm the resulting order end to end rather than merely trusting the
+cast compiles.
+
+**Bulk `RemoveItems(index, count)` loops the already-verified
+single-item `RemoveItem(int32)` rather than trusting real BeAPI's own
+bulk call to leak the same way.** This binding's standing `BListItem`
+ownership finding -- that real `RemoveItem(int32)`, `MakeEmpty()`, and
+`~BListView()` all leave removed items' memory to the caller, verified
+earlier with an instrumented `BStringItem` subclass -- was never
+independently re-confirmed for real BeAPI's own `RemoveItems(int32,
+int32)` specifically. Rather than assume it leaks identically,
+`hs_list_view_remove_items()` calls the verified single-item
+`RemoveItem(index)` in a loop, deleting each returned item itself;
+removing at the same fixed `index` on every iteration is correct, not an
+off-by-one, because each removal shifts everything after it down by
+one, so the next item to remove is always back at `index`. The loop
+also clamps naturally: it stops the moment `RemoveItem` returns `NULL`,
+so asking for more items than remain removes only what's actually
+there and reports the true count removed, rather than failing outright
+-- covered by `RemoveItemsRemovesRangeAndReportsCount`'s clamping
+assertions.
+
+**`ItemFrame`/`IndexOf(BPoint)` only return real geometry once the list
+view is attached to a window -- a genuine BeAPI behavior, found by a
+hardware probe, not assumed.** An early run of
+`ItemFrameReturnsIncreasingTopForEachRow`/`IndexOfPointMatchesItemFrame`
+failed against a freshly-constructed, never-attached `ListView` (every
+frame came back all-zero, and hit-testing always returned -1). A
+temporary probe attaching the same list view to a real `Window` before
+reading `ItemFrame` confirmed real, increasing geometry appears only
+once attached (`frame0=0,20`, `frame1=21,41` on the actual hardware,
+versus all-zero before) -- presumably because a `BStringItem`'s height
+is only measured against a real owner/font once one exists. Both tests
+were rewritten to construct a real `Window`, `AddChild` the list view
+into it, and read `ItemFrame`/`IndexOf(BPoint)` only after that; both
+native and managed doc comments now carry this requirement explicitly
+so a future caller doesn't rediscover it the hard way.
+
+**`SwapItems`/`MoveItem` return `false` for an out-of-range index
+instead of throwing or corrupting the list**, matching real
+`BListView`'s own bounds-checked behavior; `SwapItemsSwapsInPlace`/
+`MoveItemShiftsCorrectly` each assert both the successful in-range case
+and the out-of-range `false` case.
+
+**`IsEmpty`, `ScrollTo(int index)`, and `ScrollToSelection()` are thin
+wraps with no return value to assert against**, so they get smoke
+coverage only (`IsEmptyReflectsItemCount`,
+`ScrollToAndScrollToSelectionDoNotThrow`) -- `ListView` derives from
+`ViewBase`, not `View`, so there's no managed `Bounds` accessor to check
+an actual scroll offset against here (same reasoning `ViewBase.cs`
+already documents for why `Bounds` stays `View`-only).
+
+**`AddItems(IEnumerable<string>)` is a pure-managed convenience, not a
+new native call** -- it loops the existing `AddItem(string)` P/Invoke
+rather than wrapping real BeAPI's own bulk `AddList(BList*)`, which
+would need a `BList` marshaling story this binding doesn't have (and
+still doesn't add, deliberately -- see Scope, updated below).
+`AddItemsBulkConvenienceAddsEveryStringInOrder` confirms it appends
+every string in order without disturbing items already present.
+
+`Sample.exe`'s `DemoListView` gained three new buttons -- "Move Up",
+"Move Down", and "Sort A-Z" -- driving `SwapItems`/`Sort` against the
+same live list, confirmed rendering correctly with no clipping via a
+real screenshot on the Haiku box.
+
+**Scope, updated.** The items named as deferred in the Scope paragraph
+above -- `SortItems`/`SwapItems`/`MoveItem`, `ItemFrame` -- are now
+implemented; bulk `RemoveItems` and range `Select`/`DeselectExcept`,
+not named individually above but part of the same real `BListView`
+surface, are as well. `ReplaceItem`/`AddList`, `DoForEach`, custom
+`BListItem` subclasses, `BOutlineListView`, drag-and-drop reordering
+(`InitiateDrag`), the `BMessage`-based constructor/`Archive()`/
+`Instantiate()`, and wrapping in a `BScrollView` remain out of scope,
+for the same reasons as before (captured in `hs_list_view.h`'s own
+updated header comment).
+
+**Verification.** `ListViewTests.cs` (module `BListView`, 27 tests, up
+from 15) covers construction/geometry, item add/insert/remove/text
 round-tripping, single- and multi-selection semantics (including
 `CurrentSelection` returning -1 once past the number of selected rows),
 `ListType` round-tripping, `SelectionChangedFiresOnProgrammaticSelect`
 (the one input hook in this binding that actually is exercised
-end-to-end, not just visually -- see above), and the same `AddChild`/
+end-to-end, not just visually -- see above), the same `AddChild`/
 `RemoveChild`/`Dispose()`-while-attached/cascade-on-destroy ownership
 rules every other widget in this binding covers, including a cascade
 test that leaves an item in the list to confirm `HSListView`'s own
-destructor cleans it up rather than leaking it. `OnInvoked` is not
-attempted automatically, same reasoning as every other input hook in
-this binding -- real event-firing is verified visually instead:
-`Sample.exe`'s `DemoListView` (four items, "Alpha" selected by default)
-was confirmed rendering correctly -- all four rows fully visible with no
-clipping -- via a real screenshot on the Haiku box.
+destructor cleans it up rather than leaking it, and the
+completeness-pass tests described above (`SwapItemsSwapsInPlace`,
+`MoveItemShiftsCorrectly`, `RemoveItemsRemovesRangeAndReportsCount`,
+`SortAscendingOrdersAlphabetically`, `SortDescendingReversesOrder`,
+`SelectRangeSelectsInclusiveSpan`, `DeselectExceptKeepsOnlyTheGivenRange`,
+`ItemFrameReturnsIncreasingTopForEachRow`, `IndexOfPointMatchesItemFrame`,
+`IsEmptyReflectsItemCount`, `ScrollToAndScrollToSelectionDoNotThrow`,
+`AddItemsBulkConvenienceAddsEveryStringInOrder`). `OnInvoked` is still
+not attempted automatically, same reasoning as every other input hook
+in this binding -- real event-firing, and the two purely-visual
+completeness-pass additions (`Sort`/`SwapItems`, driven by the new
+buttons), are verified visually instead: `Sample.exe`'s `DemoListView`
+(four items, "Alpha" selected by default, now with "Move Up"/"Move
+Down"/"Sort A-Z" buttons beneath it) was confirmed rendering correctly
+-- all four rows and all three new buttons fully visible with no
+clipping -- via a real screenshot on the Haiku box. The full project
+test suite -- 161 tests across every module -- passes with 0 failures
+as of this pass.
+
 
 ## Running Sample.exe: what it demonstrates, and expected output
 

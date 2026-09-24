@@ -723,5 +723,44 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern uint hs_list_view_list_type(IntPtr listView);
+
+		/* Completeness pass below -- see hs_list_view.h's own header comment. */
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_list_view_swap_items(IntPtr listView, int a, int b);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_list_view_move_item(IntPtr listView, int from, int to);
+
+		[DllImport(Lib)]
+		internal static extern int hs_list_view_remove_items(IntPtr listView, int index, int count);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_sort(IntPtr listView,
+			[MarshalAs(UnmanagedType.I1)] bool ascending);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_select_range(IntPtr listView, int from, int to,
+			[MarshalAs(UnmanagedType.I1)] bool extend);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_deselect_except(IntPtr listView, int exceptFrom, int exceptTo);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_item_frame(IntPtr listView, int index, out HsRect outFrame);
+
+		[DllImport(Lib)]
+		internal static extern int hs_list_view_index_of_point(IntPtr listView, HsPoint point);
+
+		[DllImport(Lib)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		internal static extern bool hs_list_view_is_empty(IntPtr listView);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_scroll_to_index(IntPtr listView, int index);
+
+		[DllImport(Lib)]
+		internal static extern void hs_list_view_scroll_to_selection(IntPtr listView);
 	}
 }

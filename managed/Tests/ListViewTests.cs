@@ -398,4 +398,299 @@ public class ListViewTests
 				"OnDestroyed should fire on a still-attached child list view when its parent window is destroyed, even though nothing disposed it directly");
 		}
 	}
+
+	[Test]
+	public void SwapItemsSwapsInPlace()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "swap probe");
+			listView.AddItem("Alpha");
+			listView.AddItem("Beta");
+			listView.AddItem("Gamma");
+
+			bool swapped = listView.SwapItems(0, 2);
+			Assert.IsTrue(swapped, "SwapItems should return true for two valid indices");
+			Assert.AreEqual("Gamma", listView.ItemTextAt(0), "Index 0 should now hold what was at index 2");
+			Assert.AreEqual("Beta", listView.ItemTextAt(1), "Index 1 (not part of the swap) should be unaffected");
+			Assert.AreEqual("Alpha", listView.ItemTextAt(2), "Index 2 should now hold what was at index 0");
+
+			bool swappedOutOfRange = listView.SwapItems(0, 99);
+			Assert.IsFalse(swappedOutOfRange, "SwapItems should return false when either index is out of range");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void MoveItemShiftsCorrectly()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "move probe");
+			listView.AddItem("Alpha");
+			listView.AddItem("Beta");
+			listView.AddItem("Gamma");
+			listView.AddItem("Delta");
+
+			bool moved = listView.MoveItem(0, 2);
+			Assert.IsTrue(moved, "MoveItem should return true for two valid indices");
+			// Alpha moves from index 0 to index 2, shifting Beta and Gamma up by one.
+			Assert.AreEqual("Beta", listView.ItemTextAt(0), "Beta should shift down to index 0");
+			Assert.AreEqual("Gamma", listView.ItemTextAt(1), "Gamma should shift down to index 1");
+			Assert.AreEqual("Alpha", listView.ItemTextAt(2), "Alpha should now be at index 2");
+			Assert.AreEqual("Delta", listView.ItemTextAt(3), "Delta (not part of the move) should be unaffected");
+
+			bool movedOutOfRange = listView.MoveItem(0, 99);
+			Assert.IsFalse(movedOutOfRange, "MoveItem should return false when either index is out of range");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void RemoveItemsRemovesRangeAndReportsCount()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "remove range probe");
+			listView.AddItem("Alpha");
+			listView.AddItem("Beta");
+			listView.AddItem("Gamma");
+			listView.AddItem("Delta");
+			listView.AddItem("Epsilon");
+
+			int removed = listView.RemoveItems(1, 2);
+			Assert.AreEqual(2, removed, "RemoveItems should report exactly how many items it removed");
+			Assert.AreEqual(3, listView.CountItems, "CountItems should reflect the two removed items");
+			Assert.AreEqual("Alpha", listView.ItemTextAt(0), "Item 0 should be unaffected by removing items 1-2");
+			Assert.AreEqual("Delta", listView.ItemTextAt(1), "The old item 3 should shift down to index 1");
+			Assert.AreEqual("Epsilon", listView.ItemTextAt(2), "The old item 4 should shift down to index 2");
+
+			// Clamping: asking for more items than remain should remove
+			// only what's actually there, not fail outright.
+			int removedClamped = listView.RemoveItems(1, 99);
+			Assert.AreEqual(2, removedClamped, "RemoveItems should clamp to the number of items actually remaining, not fail");
+			Assert.AreEqual(1, listView.CountItems, "Only the first item should remain after the clamped removal");
+
+			int removedOutOfRange = listView.RemoveItems(50, 3);
+			Assert.AreEqual(0, removedOutOfRange, "RemoveItems should report 0 removed for an already-out-of-range index");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void SortAscendingOrdersAlphabetically()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "sort ascending probe");
+			listView.AddItem("Gamma");
+			listView.AddItem("Alpha");
+			listView.AddItem("Delta");
+			listView.AddItem("Beta");
+
+			listView.Sort();
+			Assert.AreEqual("Alpha", listView.ItemTextAt(0), "Sort() should default to ascending order");
+			Assert.AreEqual("Beta", listView.ItemTextAt(1), "Sort() should default to ascending order");
+			Assert.AreEqual("Delta", listView.ItemTextAt(2), "Sort() should default to ascending order");
+			Assert.AreEqual("Gamma", listView.ItemTextAt(3), "Sort() should default to ascending order");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void SortDescendingReversesOrder()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "sort descending probe");
+			listView.AddItem("Gamma");
+			listView.AddItem("Alpha");
+			listView.AddItem("Delta");
+			listView.AddItem("Beta");
+
+			listView.Sort(ascending: false);
+			Assert.AreEqual("Gamma", listView.ItemTextAt(0), "Sort(ascending: false) should produce descending order");
+			Assert.AreEqual("Delta", listView.ItemTextAt(1), "Sort(ascending: false) should produce descending order");
+			Assert.AreEqual("Beta", listView.ItemTextAt(2), "Sort(ascending: false) should produce descending order");
+			Assert.AreEqual("Alpha", listView.ItemTextAt(3), "Sort(ascending: false) should produce descending order");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void SelectRangeSelectsInclusiveSpan()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "select range probe",
+				ListViewType.MultipleSelection, ViewResizingMode.None,
+				ViewFlags.WillDraw | ViewFlags.FrameEvents | ViewFlags.Navigable);
+			listView.AddItem("Zero");
+			listView.AddItem("One");
+			listView.AddItem("Two");
+			listView.AddItem("Three");
+			listView.AddItem("Four");
+
+			listView.Select(1, 3);
+			Assert.IsFalse(listView.IsItemSelected(0), "Index 0 should be outside the selected range 1-3");
+			Assert.IsTrue(listView.IsItemSelected(1), "Index 1 should be inside the selected range 1-3");
+			Assert.IsTrue(listView.IsItemSelected(2), "Index 2 should be inside the selected range 1-3");
+			Assert.IsTrue(listView.IsItemSelected(3), "Index 3 should be inside the selected range 1-3");
+			Assert.IsFalse(listView.IsItemSelected(4), "Index 4 should be outside the selected range 1-3");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void DeselectExceptKeepsOnlyTheGivenRange()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "deselect except probe",
+				ListViewType.MultipleSelection, ViewResizingMode.None,
+				ViewFlags.WillDraw | ViewFlags.FrameEvents | ViewFlags.Navigable);
+			listView.AddItem("Zero");
+			listView.AddItem("One");
+			listView.AddItem("Two");
+			listView.AddItem("Three");
+			listView.AddItem("Four");
+
+			listView.Select(0, 4);
+			listView.DeselectExcept(2, 2);
+
+			Assert.IsFalse(listView.IsItemSelected(0), "Index 0 should be deselected -- outside the except range 2-2");
+			Assert.IsFalse(listView.IsItemSelected(1), "Index 1 should be deselected -- outside the except range 2-2");
+			Assert.IsTrue(listView.IsItemSelected(2), "Index 2 should remain selected -- inside the except range 2-2");
+			Assert.IsFalse(listView.IsItemSelected(3), "Index 3 should be deselected -- outside the except range 2-2");
+			Assert.IsFalse(listView.IsItemSelected(4), "Index 4 should be deselected -- outside the except range 2-2");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void ItemFrameReturnsIncreasingTopForEachRow()
+	{
+		// A ListView must be attached to a window for ItemFrame() to
+		// return real geometry -- a hardware probe found every item's
+		// frame comes back all-zero (0-height) on a never-attached list
+		// view, presumably because BStringItem's height is only
+		// measured against a real owner/font once attached. Confirmed
+		// via Console.WriteLine before this assertion shape was chosen;
+		// see this class's own remarks near the top on why every test
+		// already wraps in an Application for a similar
+		// attachment-order reason.
+		using (new Application(AppSignature))
+		using (Window window = new Window(new Rect(0, 0, 300, 200), "item frame probe window")) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "item frame probe");
+			window.AddChild(listView);
+			listView.AddItem("Alpha");
+			listView.AddItem("Beta");
+			listView.AddItem("Gamma");
+
+			Rect frame0 = listView.ItemFrame(0);
+			Rect frame1 = listView.ItemFrame(1);
+			Rect frame2 = listView.ItemFrame(2);
+
+			Assert.IsTrue(frame0.Bottom > frame0.Top, "Item 0's frame should have positive height once attached to a window");
+			Assert.IsTrue(frame1.Top >= frame0.Bottom, "Item 1's frame should start at or below where item 0's frame ends");
+			Assert.IsTrue(frame2.Top >= frame1.Bottom, "Item 2's frame should start at or below where item 1's frame ends");
+
+			// listView is still attached -- window's own Dispose() below
+			// cascades into it, same pattern as every other attached-child
+			// test in this file.
+		}
+	}
+
+	[Test]
+	public void IndexOfPointMatchesItemFrame()
+	{
+		// Same attachment requirement as ItemFrameReturnsIncreasingTopForEachRow
+		// above -- IndexOf(BPoint) hit-tests against the same per-item
+		// geometry ItemFrame() reads, which is only valid once attached.
+		using (new Application(AppSignature))
+		using (Window window = new Window(new Rect(0, 0, 300, 200), "index of point probe window")) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "index of point probe");
+			window.AddChild(listView);
+			listView.AddItem("Alpha");
+			listView.AddItem("Beta");
+			listView.AddItem("Gamma");
+
+			Rect frame1 = listView.ItemFrame(1);
+			Point centerOfItem1 = new Point(
+				(frame1.Left + frame1.Right) / 2f,
+				(frame1.Top + frame1.Bottom) / 2f);
+
+			Assert.AreEqual(1, listView.IndexOfPoint(centerOfItem1), "A point inside item 1's own frame should hit-test to index 1");
+
+			Point wayOutside = new Point(-500f, -500f);
+			Assert.AreEqual(-1, listView.IndexOfPoint(wayOutside), "A point far outside every item's frame should hit-test to -1");
+
+			// listView is still attached -- window's own Dispose() below
+			// cascades into it, same pattern as every other attached-child
+			// test in this file.
+		}
+	}
+
+	[Test]
+	public void IsEmptyReflectsItemCount()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "is empty probe");
+			Assert.IsTrue(listView.IsEmpty, "A freshly-constructed ListView should be empty");
+
+			listView.AddItem("Alpha");
+			Assert.IsFalse(listView.IsEmpty, "IsEmpty should be false once an item has been added");
+
+			listView.MakeEmpty();
+			Assert.IsTrue(listView.IsEmpty, "IsEmpty should be true again after MakeEmpty");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void ScrollToAndScrollToSelectionDoNotThrow()
+	{
+		// Smoke coverage only -- ListView derives from ViewBase, not
+		// View, so there is no managed Bounds accessor here to assert an
+		// actual scroll offset against (see View.cs's own Bounds
+		// property, which ListView deliberately does not have -- same
+		// reasoning as ViewBase.cs's own note on why Bounds stays
+		// View-only). The underlying native calls were separately
+		// confirmed on hardware to actually move the scroll position
+		// before this binding relied on them -- see hs_list_view.h's own
+		// completeness-pass note and details.md's verification writeup.
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 100, 40), "scroll probe");
+			for (int i = 0; i < 20; i++)
+				listView.AddItem("Item " + i);
+
+			listView.ScrollTo(15);
+			listView.Select(10);
+			listView.ScrollToSelection();
+
+			Assert.AreEqual(20, listView.CountItems, "Scrolling should not alter the item count");
+
+			listView.Dispose();
+		}
+	}
+
+	[Test]
+	public void AddItemsBulkConvenienceAddsEveryStringInOrder()
+	{
+		using (new Application(AppSignature)) {
+			ListView listView = new ListView(new Rect(0, 0, 200, 100), "add items probe");
+			listView.AddItem("Zero");
+
+			listView.AddItems(new string[] { "One", "Two", "Three" });
+
+			Assert.AreEqual(4, listView.CountItems, "AddItems should append every given string");
+			Assert.AreEqual("Zero", listView.ItemTextAt(0), "AddItems should not disturb items already present");
+			Assert.AreEqual("One", listView.ItemTextAt(1), "AddItems should preserve the given order");
+			Assert.AreEqual("Two", listView.ItemTextAt(2), "AddItems should preserve the given order");
+			Assert.AreEqual("Three", listView.ItemTextAt(3), "AddItems should preserve the given order");
+
+			listView.Dispose();
+		}
+	}
 }

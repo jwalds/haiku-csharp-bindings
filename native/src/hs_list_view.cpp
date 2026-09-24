@@ -7,10 +7,12 @@
 #include "hs_list_view.h"
 
 #include <cstddef>
+#include <cstring>
 
 #include <ListView.h>
 #include <StringItem.h>
 #include <Message.h>
+#include <Point.h>
 #include <Rect.h>
 #include <View.h>
 
@@ -22,6 +24,28 @@ inline BRect ToBRect(hs_rect r)
 	return BRect(r.left, r.top, r.right, r.bottom);
 }
 
+
+/* Same duplication-over-cross-file-sharing tradeoff hs_view.cpp's own
+ * ToHsRect/ToBPoint already made -- one-line conversions, not worth a
+ * shared header just to avoid a few lines appearing twice. Added for the
+ * completeness pass's ItemFrame()/IndexOf(point). */
+inline hs_rect ToHsRect(BRect r)
+{
+	hs_rect out;
+	out.left = r.left;
+	out.top = r.top;
+	out.right = r.right;
+	out.bottom = r.bottom;
+	return out;
+}
+
+
+inline BPoint ToBPoint(hs_point p)
+{
+	return BPoint(p.x, p.y);
+}
+
+
 /* Deletes every item still in list -- see hs_list_view.h's OWNERSHIP
  * note. Every item this shim ever adds is a BStringItem it created
  * itself (see hs_list_view_add_item/add_item_at below), so this cast is
@@ -32,6 +56,27 @@ void DeleteAllItems(BListView* list)
 	int32 count = list->CountItems();
 	for (int32 i = 0; i < count; i++)
 		delete static_cast<BStringItem*>(list->ItemAt(i));
+}
+
+
+/* Comparators for hs_list_view_sort() -- see that function's own comment
+ * in hs_list_view.h for why each argument is a POINTER TO a BListItem*
+ * slot (confirmed via gdb disassembly of the real libbe.so, not
+ * guessed), not a BListItem* directly. Every item in a list this shim
+ * created is a BStringItem (same invariant DeleteAllItems() above
+ * relies on), so this cast is safe for the same reason. Plain byte-wise
+ * strcmp() on Text() -- not locale-aware. */
+int CompareItemsAscending(const void* a, const void* b)
+{
+	const BStringItem* itemA = static_cast<const BStringItem*>(*(BListItem* const*)a);
+	const BStringItem* itemB = static_cast<const BStringItem*>(*(BListItem* const*)b);
+	return strcmp(itemA->Text(), itemB->Text());
+}
+
+
+int CompareItemsDescending(const void* a, const void* b)
+{
+	return -CompareItemsAscending(a, b);
 }
 
 } // namespace
@@ -240,4 +285,96 @@ void hs_list_view_set_list_type(hs_handle list_view, uint32_t type)
 uint32_t hs_list_view_list_type(hs_handle list_view)
 {
 	return static_cast<uint32_t>(static_cast<HSListView*>(list_view)->ListType());
+}
+
+
+/*
+ * --- Completeness pass below -- see hs_list_view.h's own header comment ---
+ */
+
+bool hs_list_view_swap_items(hs_handle list_view, int32_t a, int32_t b)
+{
+	return static_cast<HSListView*>(list_view)->SwapItems(a, b);
+}
+
+
+bool hs_list_view_move_item(hs_handle list_view, int32_t from, int32_t to)
+{
+	return static_cast<HSListView*>(list_view)->MoveItem(from, to);
+}
+
+
+int32_t hs_list_view_remove_items(hs_handle list_view, int32_t index, int32_t count)
+{
+	/* Loop over the already-verified single-item RemoveItem(int32)
+	 * rather than trusting real BeAPI's own bulk RemoveItems() to leak
+	 * the same way -- see this function's own comment in
+	 * hs_list_view.h for why. Removing at a fixed `index` repeatedly is
+	 * correct (not off-by-one) because each removal shifts everything
+	 * after it down by one, so the "next" item to remove is always back
+	 * at `index` again. */
+	HSListView* view = static_cast<HSListView*>(list_view);
+	int32_t removed = 0;
+	for (int32_t i = 0; i < count; i++) {
+		BListItem* item = view->RemoveItem(index);
+		if (item == NULL)
+			break;
+		delete static_cast<BStringItem*>(item);
+		removed++;
+	}
+	return removed;
+}
+
+
+void hs_list_view_sort(hs_handle list_view, bool ascending)
+{
+	static_cast<HSListView*>(list_view)->SortItems(
+		ascending ? CompareItemsAscending : CompareItemsDescending);
+}
+
+
+void hs_list_view_select_range(hs_handle list_view, int32_t from, int32_t to, bool extend)
+{
+	static_cast<HSListView*>(list_view)->Select(from, to, extend);
+}
+
+
+void hs_list_view_deselect_except(hs_handle list_view, int32_t except_from, int32_t except_to)
+{
+	static_cast<HSListView*>(list_view)->DeselectExcept(except_from, except_to);
+}
+
+
+void hs_list_view_item_frame(hs_handle list_view, int32_t index, hs_rect* out_frame)
+{
+	if (out_frame == NULL)
+		return;
+	HSListView* view = static_cast<HSListView*>(list_view);
+	if (index < 0 || index >= view->CountItems())
+		return;
+	*out_frame = ToHsRect(view->ItemFrame(index));
+}
+
+
+int32_t hs_list_view_index_of_point(hs_handle list_view, hs_point point)
+{
+	return static_cast<HSListView*>(list_view)->IndexOf(ToBPoint(point));
+}
+
+
+bool hs_list_view_is_empty(hs_handle list_view)
+{
+	return static_cast<HSListView*>(list_view)->IsEmpty();
+}
+
+
+void hs_list_view_scroll_to_index(hs_handle list_view, int32_t index)
+{
+	static_cast<HSListView*>(list_view)->ScrollTo(index);
+}
+
+
+void hs_list_view_scroll_to_selection(hs_handle list_view)
+{
+	static_cast<HSListView*>(list_view)->ScrollToSelection();
 }
