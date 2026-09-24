@@ -482,6 +482,24 @@ no longer crashes in any tested configuration, and the one remaining
 cosmetic symptom is now fully eliminable, opt-in, with a one-line env
 var and no source change on the consumer's end.
 
+**Made the default for this repo's own documented/scripted workflows.**
+The opt-in above was real but easy to forget -- exactly what happened
+here: a user re-reported the warning after this fix had already shipped,
+simply because the command they ran (typed by hand, or an old habit)
+didn't happen to include `MONO_THREADS_SUSPEND=preemptive`. Rather than
+rely on everyone remembering a one-line env var, `run_sample.sh` and
+`run_tests.sh` (repo root) now wrap `mono` and set it automatically,
+alongside the `LIBRARY_PATH` every invocation already needed --
+`./run_sample.sh`/`./run_tests.sh` are now what `build.sh`'s own printed
+instructions and README.md's quick-start recommend, so anyone following
+the documented path gets the fully-silent, hardware-verified-safe
+behavior without having to know this issue exists. The underlying shim
+logic is unchanged -- `RealDetachIsSafe()` still reads the env var
+adaptively and still falls back safely when it's unset -- so a bare
+`mono Sample.exe`/`mono Tests.exe` invocation (or any other consumer
+embedding this binding directly) still defaults to the safe fallback
+exactly as before; only this repo's own recommended entry points changed.
+
 **Where to pick this up:** eliminating the warning under the *default*
 suspend mode too (rather than requiring the `MONO_THREADS_SUSPEND=
 preemptive` opt-in) would still require either (a) understanding why

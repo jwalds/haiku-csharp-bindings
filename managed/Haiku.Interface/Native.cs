@@ -418,6 +418,11 @@ namespace Haiku.Interface
 		[DllImport(Lib)]
 		internal static extern uint hs_button_behavior(IntPtr button);
 
+		/* Genuine BInvoker usage, not a test hack -- see hs_button.h's own
+		 * comment on hs_button_invoke() for why. */
+		[DllImport(Lib)]
+		internal static extern void hs_button_invoke(IntPtr button);
+
 		/* TextControl -- see hs_text_control.h for the full design
 		 * rationale, including the "MUST NOT be called before a
 		 * BApplication has been constructed" note on hs_text_control_create.

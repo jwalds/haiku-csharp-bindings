@@ -711,22 +711,86 @@ an `HSButton` handle (they write to `HSView`-specific fields that don't
 exist at that layout on a real `HSButton` object), not just meaningless.
 
 **Verification.** `ButtonTests.cs` (module `BButton`) covers everything
-that doesn't need a real click: construction/geometry (through
+that doesn't need a real mouse click: construction/geometry (through
 `ViewBase`), `Label`/`Value`/`IsEnabled`/`IsDefault`/`IsFlat`/`Behavior`
-round-tripping, the `ButtonBehavior` enum's exact values, and the same
-ownership/parenting rules `ViewTests.cs` already covers for `View`
-(`AddChild`/`RemoveChild`, `Dispose()`-while-attached throwing, cascade-
-on-parent-destroy) -- re-verified here since `Button` now goes through
-`ViewBase` instead of duplicating `View`'s own implementation. Real click-
-firing has no automated coverage, same reasoning as every other input
-hook in this binding (see `ButtonTests.cs`'s own class remarks) --
-verified instead by running `Sample.exe`'s `DemoButton` (a real "Click
-Me" button beneath `DemoView` that updates its own label with a running
-click count and disables itself after three clicks, to make `IsEnabled`'s
-effect visible on screen) and confirmed with a real screenshot on the
-Haiku box (`screenshot -s -f png`, run silently to avoid the interactive
-save dialog blocking over SSH) showing the button rendered correctly,
+round-tripping, the `ButtonBehavior` enum's exact values, `Invoke()`'s own
+behavior (see the bug writeup below), and the same ownership/parenting
+rules `ViewTests.cs` already covers for `View` (`AddChild`/`RemoveChild`,
+`Dispose()`-while-attached throwing, cascade-on-parent-destroy) --
+re-verified here since `Button` now goes through `ViewBase` instead of
+duplicating `View`'s own implementation. The actual mouse-driven path
+still has no automated coverage, same reasoning as every other input hook
+in this binding (see `ButtonTests.cs`'s own class remarks) -- verified
+instead by running `Sample.exe`'s `DemoButton` (a real "Click Me" button
+beneath `DemoView` that updates its own label with a running click count
+and disables itself after three clicks, to make `IsEnabled`'s effect
+visible on screen) and confirmed with a real screenshot on the Haiku box
+(`screenshot -s -f png`, run silently to avoid the interactive save
+dialog blocking over SSH) showing the button rendered correctly,
 positioned beneath `DemoView` with the expected native 3D-bevel look.
+
+**A real bug found and fixed: buttons stayed visually pressed after being
+clicked.** A user reported that after clicking a button, it never
+rendered back as unpressed. Root-caused via `gdb` disassembly of the real
+installed `libbe.so` -- not guessed -- rather than by poking at the
+shim's code in isolation. Disassembling `BButton::MouseDown()`'s own
+synchronous mouse-tracking loop (the default path, taken whenever a
+window lacks `B_ASYNCHRONOUS_CONTROLS`) showed that when the mouse is
+released while still over the button, that loop leaves `Value()` at
+`B_CONTROL_ON` and calls `Invoke()` -- it does NOT reset `Value()` back
+to `B_CONTROL_OFF` itself. Disassembling `BControl::Invoke()` (the base
+implementation) confirmed it never touches `Value()` either -- it only
+ever builds and posts a `BMessage`. The actual reset happens in
+`BButton::Invoke()` specifically, which this shim had never disassembled
+before writing `HSButton::Invoke()`:
+
+```
+BButton::Invoke(BMessage* message)
+{
+    Sync();
+    snooze(50000);                       // 50ms "flash" so the pressed
+                                          // look is visible even on a
+                                          // very fast click
+    status_t result = BControl::Invoke(message);
+    if (Behavior() != B_TOGGLE_BEHAVIOR && Value() != B_CONTROL_OFF)
+        SetValue(B_CONTROL_OFF);         // the actual unpress
+    return result;
+}
+```
+
+`HSButton::Invoke()` replaces `BButton::Invoke()` wholesale (see the
+`OnClick` note above -- a deliberate scope decision, made knowingly)
+rather than calling it or `BControl::Invoke()` from inside the override.
+That was fine for delivering the click callback, but it silently dropped
+this reset along with everything else `BButton::Invoke()` did, and
+nothing else in the real, unmodified `MouseDown()` loop covers for it.
+**Fix:** `HSButton::Invoke()` (native/src/hs_button.cpp) now reproduces
+the `Behavior()`-gated `SetValue(B_CONTROL_OFF)` reset explicitly, after
+firing the click callback. The `Sync()`+`snooze(50ms)` flash was
+deliberately NOT reproduced -- the reported bug was the missing reset,
+not a too-brief flash, and adding a blocking 50ms snooze to every click
+was judged not worth the tradeoff for this binding's synchronous
+callback design.
+
+Fixing this also closed a real testing gap: `hs_button_invoke()` (and
+`Button.Invoke()`) now expose `Invoke(NULL)` as a directly callable
+native method. This is not a synthetic test hook -- real
+`BInvoker::Invoke()` is meant to be called directly by application code
+this way (real `BButton::KeyDown()` calls it exactly this way for
+Enter/Return on a default button), so `ButtonTests.cs` now has real,
+non-visual coverage of the click path for the first time:
+`InvokeFiresOnClick` (calls `Invoke()`, asserts `OnClick` fired),
+`InvokeResetsPressedValueForPushButton` (the direct regression test for
+this bug: sets `Value = 1` to simulate the pressed state a real
+`MouseDown()` leaves the button in, calls `Invoke()`, asserts `Value`
+reads back `0`), and `InvokeLeavesValueAloneForToggleBehavior` (the other
+half of the same real behavior: a toggle-behavior button's `Value` must
+NOT be reset by `Invoke()`, or a toggle button could never stay toggled
+on). All three pass on hardware. The actual mouse-driven path into
+`Invoke()` -- real `BButton::MouseDown()`'s own tracking loop, unmodified
+by this shim -- is still only verified visually, via `Sample.exe`, same
+as before.
+
 
 ## TextControl: two change events, a construction-time BApplication requirement, and a height surprise
 

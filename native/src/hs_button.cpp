@@ -63,6 +63,26 @@ public:
 		 * actually override it. */
 		if (fClickCallback != NULL)
 			fClickCallback(fClickUserData);
+
+		/* BUG FIX -- see hs_button.h's own "REAL BUG THIS OVERRIDE
+		 * INTRODUCED" note for the full gdb-disassembly writeup. Real
+		 * BButton::Invoke() (NOT BControl::Invoke(), which never touches
+		 * Value()) is what resets a pushed, non-toggle button's Value()
+		 * back to B_CONTROL_OFF after a click -- confirmed by
+		 * disassembling the real installed libbe.so, not guessed. Because
+		 * this override replaces BButton::Invoke() wholesale instead of
+		 * extending it, that reset never ran, and every non-toggle button
+		 * stayed visually pressed forever after being clicked (real
+		 * BButton's own MouseDown() tracking loop does NOT reset Value()
+		 * itself for the "released while still over the button" case --
+		 * also confirmed via disassembly -- it relies on Invoke() to do
+		 * it). Toggle-behavior buttons are deliberately excluded here,
+		 * matching real BButton::Invoke()'s own Behavior() check -- a
+		 * toggle button's Value() is meant to stay however the click just
+		 * left it. */
+		if (Behavior() != B_TOGGLE_BEHAVIOR && Value() != B_CONTROL_OFF)
+			SetValue(B_CONTROL_OFF);
+
 		return B_OK;
 	}
 
@@ -113,6 +133,15 @@ void hs_button_set_destroyed_callback(hs_handle button,
 	hs_button_destroyed_callback callback, void* user_data)
 {
 	static_cast<HSButton*>(button)->SetDestroyedCallback(callback, user_data);
+}
+
+
+/* See hs_button.h's own comment on this declaration -- genuine BInvoker
+ * usage, not a test hack. Runs the exact same Invoke() override above,
+ * including the click callback and the pressed-Value() reset. */
+void hs_button_invoke(hs_handle button)
+{
+	static_cast<HSButton*>(button)->Invoke();
 }
 
 

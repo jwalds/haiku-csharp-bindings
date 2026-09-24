@@ -22,10 +22,15 @@ mcs -target:exe -out:Tests.exe -reference:Haiku.App.dll -reference:Haiku.Interfa
 
 echo
 echo "Build complete. Run the sample with:"
-echo "  LIBRARY_PATH=\"\$(pwd)/native:\$HOME/config/non-packaged/lib:\$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:\$LIBRARY_PATH\" mono Sample.exe"
+echo "  ./run_sample.sh"
 echo
 echo "Run the test suite with:"
-echo "  LIBRARY_PATH=\"\$(pwd)/native:\$HOME/config/non-packaged/lib:\$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:\$LIBRARY_PATH\" mono Tests.exe"
-echo "(pass a substring, e.g. \"mono Tests.exe Message\", to run just one test class)"
+echo "  ./run_tests.sh"
+echo "(pass a substring, e.g. \"./run_tests.sh Message\", to run just one test class)"
 echo
-echo "(Haiku's runtime_loader uses LIBRARY_PATH, not LD_LIBRARY_PATH -- see README.md.)"
+echo "(Those wrapper scripts set LIBRARY_PATH -- Haiku's runtime_loader uses that, not"
+echo " LD_LIBRARY_PATH, see README.md -- and MONO_THREADS_SUSPEND=preemptive, which"
+echo " KNOWN_ISSUES.md #3 verified silences Mono's benign 'Failed aborting id' warning"
+echo " on quit. To run mono directly instead:"
+echo "  MONO_THREADS_SUSPEND=preemptive LIBRARY_PATH=\"\$(pwd)/native:\$HOME/config/non-packaged/lib:\$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:\$LIBRARY_PATH\" mono Sample.exe"
+echo ")"

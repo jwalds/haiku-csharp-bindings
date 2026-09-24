@@ -29,38 +29,49 @@ the mono port).
 git clone https://github.com/jwalds/haiku-csharp-bindings.git
 cd haiku-csharp-bindings
 ./build.sh
-LIBRARY_PATH="$(pwd)/native:$HOME/config/non-packaged/lib:$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:$LIBRARY_PATH" mono Sample.exe
+./run_sample.sh
 ```
 
-(Haiku's own dynamic loader does not use `LD_LIBRARY_PATH` the way Linux does --
-it is a BeOS-derived system and its runtime_loader looks at `LIBRARY_PATH`
-instead. Setting `LD_LIBRARY_PATH` here is silently ignored, which is why an
-otherwise-correct build can still fail to find `libhaikusharp.so` with a
-`DllNotFoundException` at run time. Using an absolute path for the `native`
-directory, rather than a bare relative `native`, avoids any ambiguity about
-what the loader resolves a relative `LIBRARY_PATH` entry against.
+`run_sample.sh` (and `run_tests.sh`, for the test suite) are thin wrappers
+around `mono` that set two things every invocation needs:
 
-The explicit system lib directories in that command (rather than just
-appending the ambient `$LIBRARY_PATH`) matter more than they look: Haiku's
-`SetupEnvironment` boot script, which normally populates `LIBRARY_PATH` with
-those same paths, only runs for a desktop session. An SSH login shell does
-not get it, so `$LIBRARY_PATH` there starts out empty, and appending an
-empty variable to your own native directory finds *only* your own directory
--- silently missing system libraries like `libbsd.so` that `libnetwork.so`
-needs. Spelling out the full path explicitly works the same whether you are
-sitting at Haiku's own Terminal or running this over SSH.)
+- `LIBRARY_PATH` -- Haiku's own dynamic loader does not use
+  `LD_LIBRARY_PATH` the way Linux does -- it is a BeOS-derived system and
+  its runtime_loader looks at `LIBRARY_PATH` instead. Setting
+  `LD_LIBRARY_PATH` is silently ignored, which is why an otherwise-correct
+  build can still fail to find `libhaikusharp.so` with a
+  `DllNotFoundException` at run time. The scripts use an absolute path for
+  the `native` directory, rather than a bare relative `native`, to avoid
+  any ambiguity about what the loader resolves a relative `LIBRARY_PATH`
+  entry against, and include Haiku's own system lib directories explicitly
+  rather than just appending the ambient `$LIBRARY_PATH` -- Haiku's
+  `SetupEnvironment` boot script, which normally populates `LIBRARY_PATH`
+  with those same paths, only runs for a desktop session, so an SSH login
+  shell starts with it empty, and appending an empty variable to your own
+  native directory finds *only* your own directory, silently missing
+  system libraries like `libbsd.so` that `libnetwork.so` needs.
+- `MONO_THREADS_SUSPEND=preemptive` -- must be set before `mono` starts
+  (Mono's own launcher reads it once at process bootstrap, so setting it
+  from inside managed code is too late). This is what gives every window/
+  application teardown a real `mono_thread_detach()` instead of this
+  binding's safe-but-cosmetic fallback, which in turn is what silences
+  Mono's benign "Failed aborting id" warning on quit -- hardware-verified
+  safe (6+ full `Tests.exe` runs and 150+ `HammerProbe.exe` create/show/
+  close cycles, zero crashes, zero hangs, warning never appeared once).
+  See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md#3-benign-failed-aborting-id-mono-warning-on-window-quit-two-crash-prone-obvious-fixes-and-the-real-one)
+  for the full investigation.
 
-By default, quitting a window or application prints a benign, non-fatal
-"Failed aborting id" warning from Mono on some runs -- harmless, but if
-you want a fully silent shutdown, set `MONO_THREADS_SUSPEND=preemptive`
-in the environment before launching `mono` (works with any command above,
-e.g. `MONO_THREADS_SUSPEND=preemptive LIBRARY_PATH=... mono Sample.exe`).
-See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md#3-benign-failed-aborting-id-mono-warning-on-window-quit-two-crash-prone-obvious-fixes-and-the-real-one)
-for the full investigation and hardware verification behind this recipe.
+To run `mono` directly instead of using the wrapper scripts (e.g. to pass
+extra `mono` flags), set both by hand:
 
-Run the test suite the same way, with `Tests.exe` in place of `Sample.exe`
-(`mono Tests.exe`, or `mono Tests.exe <substring>` to run just one
-module). See [details.md](details.md#running-sampleexe-what-it-demonstrates-and-expected-output)
+```
+MONO_THREADS_SUSPEND=preemptive LIBRARY_PATH="$(pwd)/native:$HOME/config/non-packaged/lib:$HOME/config/lib:/boot/system/non-packaged/lib:/boot/system/lib:$LIBRARY_PATH" mono Sample.exe
+```
+
+Run the test suite the same way, with `./run_tests.sh` in place of
+`./run_sample.sh` (`./run_tests.sh <substring>`, e.g. `./run_tests.sh
+Button`, to run just one module -- same as `mono Tests.exe <substring>`
+directly). See [details.md](details.md#running-sampleexe-what-it-demonstrates-and-expected-output)
 for what `Sample.exe` actually demonstrates and its expected console
 output, and [details.md](details.md#testing) for the test framework
 `Tests.exe` runs on.

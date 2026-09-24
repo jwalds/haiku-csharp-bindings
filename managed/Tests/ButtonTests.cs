@@ -11,27 +11,34 @@ using Haiku.Testing;
 /// added as a child of a Window OR a plain View the exact same way a View
 /// itself can (see Window.AddChild(ViewBase)/View.AddChild(ViewBase)).
 ///
-/// THERE IS NO AUTOMATED TEST HERE THAT ACTUALLY FIRES OnClick. Same
-/// reasoning as ViewInputTests.cs's own class remarks for
-/// OnMouseDown/OnKeyDown/etc: there is no supported way to synthesize a
-/// real click from inside the same process without either driving actual
-/// hardware or hand-constructing and posting raw BMessages (and this
-/// binding doesn't even expose the BMessage/BInvoker machinery a real
-/// click would normally go through -- see hs_button.h's "NO BMessage/
-/// BInvoker/TARGET PLUMBING" note). What IS automatable, and covered
-/// below, is everything that doesn't depend on a real click arriving:
-/// construction/geometry (inherited from ViewBase, reusing
-/// hs_view_get_frame/move_to/resize_to against a button handle -- the
-/// ABI-offset fact hs_view.cpp's hs_view_add_child() comment documents
-/// and a native probe verified on real hardware), Label/Value/IsEnabled/
-/// IsDefault/IsFlat/Behavior round-tripping, the ButtonBehavior enum's
-/// exact values, and every ownership/parenting rule ViewTests.cs already
-/// covers for View (AddChild/RemoveChild, Dispose-while-attached
+/// A REAL MOUSE CLICK IS STILL NOT SYNTHESIZED HERE -- same reasoning as
+/// ViewInputTests.cs's own class remarks for OnMouseDown/OnKeyDown/etc:
+/// there is no supported way to drive an actual click from inside the
+/// same process without either driving real hardware or hand-constructing
+/// and posting raw BMessages. What Button.Invoke() DOES let this module
+/// test directly, though, is everything a real click ultimately causes --
+/// see InvokeFiresOnClick/InvokeResetsPressedValueForPushButton/
+/// InvokeLeavesValueAloneForToggleBehavior below. Invoke() is genuine
+/// BInvoker API, meant to be callable directly by application code (real
+/// BButton's own KeyDown() handling for a default button calls it exactly
+/// this way for Enter/Return), not a synthetic test-only hook -- see
+/// hs_button.h's own comment on hs_button_invoke() for why calling it
+/// here is legitimate coverage, not a workaround. What's still only
+/// covered visually, via Sample.exe (same division of labor as Draw() and
+/// the mouse/keyboard hooks) is the actual mouse-driven path into
+/// Invoke() -- MouseDown()'s real tracking loop, unmodified from real
+/// BButton, is what calls it in response to an actual click.
+///
+/// Also covered below: construction/geometry (inherited from ViewBase,
+/// reusing hs_view_get_frame/move_to/resize_to against a button handle --
+/// the ABI-offset fact hs_view.cpp's hs_view_add_child() comment
+/// documents and a native probe verified on real hardware), Label/Value/
+/// IsEnabled/IsDefault/IsFlat/Behavior round-tripping, the ButtonBehavior
+/// enum's exact values, and every ownership/parenting rule ViewTests.cs
+/// already covers for View (AddChild/RemoveChild, Dispose-while-attached
 /// throwing, cascade-on-parent-destroy) -- re-verified here for Button
 /// specifically since it now goes through a shared ViewBase rather than
-/// duplicating View's own implementation. Real click-firing is verified
-/// visually instead, via Sample.exe -- same division of labor as Draw()
-/// and the mouse/keyboard hooks.
+/// duplicating View's own implementation.
 ///
 /// Follows ViewTests'/ViewInputTests' now-established pattern of opening
 /// (and disposing, via `using`) a fresh, never-Run() BApplication per test
@@ -196,6 +203,64 @@ public class ButtonTests
 		Assert.AreEqual(0, (int)ButtonBehavior.PushButton, "PushButton should be B_BUTTON_BEHAVIOR (0)");
 		Assert.AreEqual(1, (int)ButtonBehavior.Toggle, "Toggle should be B_TOGGLE_BEHAVIOR (1)");
 		Assert.AreEqual(2, (int)ButtonBehavior.PopUpMenu, "PopUpMenu should be B_POP_UP_BEHAVIOR (2)");
+	}
+
+	[Test]
+	public void InvokeFiresOnClick()
+	{
+		ProbeButton button = new ProbeButton(new Rect(0, 0, 100, 20), "invoke probe", "Click Me");
+		Assert.IsFalse(button.ClickFired, "ClickFired should be false before Invoke() is ever called");
+
+		button.Invoke();
+
+		Assert.IsTrue(button.ClickFired, "Invoke() should fire OnClick synchronously, same as a real click would");
+
+		button.Dispose();
+	}
+
+	[Test]
+	public void InvokeResetsPressedValueForPushButton()
+	{
+		// Regression test for a real reported bug: HSButton::Invoke()
+		// (native/src/hs_button.cpp) replaces real BButton::Invoke()
+		// wholesale instead of extending it, and it turns out real
+		// BButton::Invoke() -- not BControl::Invoke(), confirmed via gdb
+		// disassembly of the real installed libbe.so -- is what resets a
+		// pushed button's Value() back to B_CONTROL_OFF after a click.
+		// Before the fix, this stayed B_CONTROL_ON forever, and the
+		// button stayed visually pressed. See hs_button.h's own "A REAL
+		// BUG THIS OVERRIDE INTRODUCED" note for the full story.
+		Button button = new Button(new Rect(0, 0, 100, 20), "unpress probe", "Click Me");
+		Assert.AreEqual(ButtonBehavior.PushButton, button.Behavior, "Sanity check: should default to non-toggle PushButton behavior");
+
+		// Simulate the "still visually pressed" state a real MouseDown()
+		// leaves the button in while the mouse is held down over it.
+		button.Value = 1;
+		Assert.AreEqual(1, button.Value, "Sanity check: Value should read back B_CONTROL_ON after being set");
+
+		button.Invoke();
+
+		Assert.AreEqual(0, button.Value, "Invoke() should reset a pushed (non-toggle) button's Value back to B_CONTROL_OFF, unpressing it");
+
+		button.Dispose();
+	}
+
+	[Test]
+	public void InvokeLeavesValueAloneForToggleBehavior()
+	{
+		// The other half of the same real BButton::Invoke() behavior:
+		// a B_TOGGLE_BEHAVIOR button's Value is meant to stay however
+		// the click just left it -- Invoke() must NOT reset it, or a
+		// toggle button could never actually stay toggled on.
+		Button button = new Button(new Rect(0, 0, 100, 20), "toggle probe", "Toggle");
+		button.Behavior = ButtonBehavior.Toggle;
+
+		button.Value = 1;
+		button.Invoke();
+
+		Assert.AreEqual(1, button.Value, "Invoke() should leave a toggle-behavior button's Value untouched, matching real BButton::Invoke()'s own Behavior() check");
+
+		button.Dispose();
 	}
 
 	[Test]

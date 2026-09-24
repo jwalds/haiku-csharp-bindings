@@ -138,6 +138,26 @@ namespace Haiku.Interface
 			}
 		}
 
+		/// <summary>
+		/// Fires <see cref="OnClick"/> directly, exactly as if the button
+		/// had just been clicked (or, for the default button, as if
+		/// Enter/Return had just been pressed) -- real BeAPI's own
+		/// BInvoker::Invoke() is meant to be called directly by
+		/// application code this way, not just internally by mouse
+		/// tracking, so this is genuine API usage, not a synthetic test
+		/// hook. For a non-<see cref="ButtonBehavior.Toggle"/> button
+		/// whose <see cref="Control.Value"/> is currently B_CONTROL_ON
+		/// (i.e. it looks pressed), this also resets it back to
+		/// B_CONTROL_OFF afterward, matching real BButton::Invoke() --
+		/// see hs_button.h's own "A REAL BUG THIS OVERRIDE INTRODUCED"
+		/// note for the hardware-verified story behind that reset.
+		/// </summary>
+		public void Invoke()
+		{
+			CheckNotConsumed();
+			Native.hs_button_invoke(_handle);
+		}
+
 		private static Button FromUserData(IntPtr userData)
 		{
 			return (Button)GCHandle.FromIntPtr(userData).Target;
