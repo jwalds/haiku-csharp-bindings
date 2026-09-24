@@ -128,6 +128,12 @@ namespace Haiku.Interface
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	internal delegate void ListViewDestroyedCallback(IntPtr userData);
 
+	/* ScrollView has no click/change callback of its own -- see
+	 * hs_scroll_view.h's "NO BMessage/BInvoker PLUMBING" note -- just a
+	 * destroyed callback, same shape as every other HS* type's. */
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+	internal delegate void ScrollViewDestroyedCallback(IntPtr userData);
+
 	/* Mirrors hs_rect (see native/include/hs_types.h) exactly. Haiku.App.Native
 	 * already has its own internal HsRect for the same purpose, but that one
 	 * is `internal` to the Haiku.App assembly and invisible here. Rather than
@@ -767,5 +773,24 @@ namespace Haiku.Interface
 
 		[DllImport(Lib)]
 		internal static extern void hs_list_view_scroll_to_selection(IntPtr listView);
+
+		/* ScrollView -- see hs_scroll_view.h for the full design
+		 * rationale, including the WRAPPING AND REPARENTING note
+		 * (hs_scroll_view_create() reparents `target` itself; the
+		 * managed ScrollView constructor must NOT also call
+		 * View.AddChild() on it). No Label/Value/IsEnabled -- BScrollView
+		 * is not a BControl. */
+		[DllImport(Lib)]
+		internal static extern IntPtr hs_scroll_view_create(IntPtr target, string name,
+			uint resizingMode, uint flags,
+			[MarshalAs(UnmanagedType.I1)] bool horizontal,
+			[MarshalAs(UnmanagedType.I1)] bool vertical, uint border);
+
+		[DllImport(Lib)]
+		internal static extern void hs_scroll_view_destroy(IntPtr scrollView);
+
+		[DllImport(Lib)]
+		internal static extern void hs_scroll_view_set_destroyed_callback(IntPtr scrollView,
+			ScrollViewDestroyedCallback callback, IntPtr userData);
 	}
 }

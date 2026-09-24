@@ -1450,10 +1450,13 @@ implemented; bulk `RemoveItems` and range `Select`/`DeselectExcept`,
 not named individually above but part of the same real `BListView`
 surface, are as well. `ReplaceItem`/`AddList`, `DoForEach`, custom
 `BListItem` subclasses, `BOutlineListView`, drag-and-drop reordering
-(`InitiateDrag`), the `BMessage`-based constructor/`Archive()`/
-`Instantiate()`, and wrapping in a `BScrollView` remain out of scope,
-for the same reasons as before (captured in `hs_list_view.h`'s own
-updated header comment).
+(`InitiateDrag`), and the `BMessage`-based constructor/`Archive()`/
+`Instantiate()` remain out of scope, for the same reasons as before
+(captured in `hs_list_view.h`'s own updated header comment). Wrapping in
+a `BScrollView` -- named as out of scope in an earlier pass -- is no
+longer out of scope; see the ScrollView section below, added later in
+response to a real user report that this list rendered with no visible
+scrollbar.
 
 **Verification.** `ListViewTests.cs` (module `BListView`, 27 tests, up
 from 15) covers construction/geometry, item add/insert/remove/text
@@ -1483,6 +1486,115 @@ Down"/"Sort A-Z" buttons beneath it) was confirmed rendering correctly
 clipping -- via a real screenshot on the Haiku box. The full project
 test suite -- 161 tests across every module -- passes with 0 failures
 as of this pass.
+
+
+## ScrollView: closing a real, user-reported rendering gap, and a construction order borrowed straight from real BeAPI
+
+Not part of the original slice plan -- prompted directly by a user
+report. After the ListView completeness pass above shipped, the user
+sent two screenshots of the real BeOS "Sliders, Tabs & Lists" demo app
+and said this binding's own `ListView` looked "a little odd looking" by
+comparison. Given four candidate explanations via `AskUserQuestion`
+("Missing scrollbar", "Per-item colored/multi-part text", "Selection
+highlight looks different", "Something else in the screenshot"), the
+user picked "Missing scrollbar" -- confirmed by comparing the two
+screenshots directly: a plain, unwrapped `BListView` renders with no
+scrollbar at all, while the real demo app's list has a visible one down
+its right edge. This section covers the fix: a new `ScrollView` class
+wrapping `BScrollView`, generic over any `ViewBase`, not ListView-
+specific, even though ListView is what prompted it.
+
+**Scope.** `hs_scroll_view_create()`/`HSScrollView` wrap `BScrollView`
+(`headers/os/interface/ScrollView.h`) around an existing target view,
+exposing the constructor's `resizingMode`/`flags`/`horizontal`/
+`vertical`/`border` parameters and nothing else -- `ScrollBar
+(orientation)` (getting the actual `BScrollBar*` to configure its range/
+proportion/steps directly), `SetBorder()`/`Border()`, `SetTarget()`/
+`Target()` (re-targeting an existing `BScrollView` after construction),
+and `SetBorderHighlighted()` are all real `BScrollView`/`BScrollBar` API
+deliberately left out, matching this binding's established pattern of
+shipping a minimal-but-real vertical slice first and coming back for a
+completeness pass later if needed (see the Slider and ListView sections
+above for two earlier examples of exactly this shape). `BListView::
+TargetedByScrollView()` (confirmed to exist via `nm -D`) suggested a
+plain `BListView` already knows how to keep its selection scrolled into
+view once wrapped, with no extra plumbing needed here for that to work
+-- and hardware testing confirmed it: wrapping `DemoListView` needed no
+change to `ListView.cs` at all.
+
+**A construction-order fact verified via `gdb`, not assumed, that shapes
+the whole managed API.** Before writing any code, `BScrollView`'s real
+constructor and its private `_Init(horizontal, vertical)` helper were
+disassembled against the actual installed `libbe.so` on the Haiku box.
+`_Init()` calls `BView::AddChild()` internally -- at least twice: once
+to attach the wrapped target view, once more per `BScrollBar` it
+constructs for whichever of `horizontal`/`vertical` were requested. In
+other words, constructing a real `BScrollView` around a target
+*already reparents that target as a side effect of construction* --
+exactly the way real BeAPI application code is meant to use it (build
+your target view with its final on-screen frame, then hand it straight
+to `new BScrollView(...)`, never calling `AddChild()` on it yourself).
+`hs_scroll_view_create()` therefore does **not** also call
+`hs_view_add_child()`/`AddChild()` on the target -- doing so would
+double-add it. On the managed side, `ScrollView`'s constructor mirrors
+this: instead of calling `View.AddChild()`, it sets `target._hasParent
+= true` directly, the exact same internal-field write
+`View.AddChild(ViewBase)`/`Window.AddChild(ViewBase)` already perform
+after their own native `AddChild()` call (see `ViewBase.cs`'s own
+comment on why that field is `internal` rather than `private`). That
+one write is enough to make `target.Dispose()` throw while wrapped
+(`ViewBase.Dispose()` already checks it) and to make the ordinary
+destroyed-callback cascade -- a real `~BView()` recursively deletes
+still-attached children -- fire the target's own destroyed callback if
+the `ScrollView` (or something above it in the parent chain) is
+destroyed while the target is still attached. No new mechanism was
+needed for either of those; both fall out of mechanisms this binding
+already had for `View`/`Button`/etc. `ScrollViewTests.cs`'s
+`RemoveChildThenDisposeCascadesDestroyToTarget` and
+`WindowDisposeCascadesToScrollViewAndItsTarget` exist specifically to
+prove this claim on hardware rather than just assert it: they use a
+`ProbeView` target whose own `OnDestroyed` is independently observable,
+so a silent failure to reparent natively (leaving `_hasParent` telling
+a true story the native object graph didn't back up) would show up as
+those two tests failing, not passing.
+
+`border_style` (`headers/os/interface/InterfaceDefs.h`) is a plain,
+non-flags enum -- `B_PLAIN_BORDER` = 0, `B_FANCY_BORDER` = 1,
+`B_NO_BORDER` = 2, read directly from the real installed header, not
+assumed. The new `ScrollViewBorder` enum mirrors these three values
+exactly, and `ScrollView`'s convenience constructor defaults to
+`ScrollViewBorder.Fancy`, matching real `BScrollView`'s own default.
+
+**No BMessage/BInvoker plumbing -- there isn't any to have.** Unlike
+`BButton`/`BCheckBox`, `BScrollView` is not a `BControl`/`BInvoker` at
+all: it never posts a `BMessage` anywhere, so there is no `Invoke()` to
+override and no click/change callback to wire up. `HSScrollView`
+overrides only its destructor, for the destroyed callback -- the same
+minimal-override shape as every other `HS*` class in this binding.
+
+**Verification.** `ScrollViewTests.cs` (module `BScrollView`, 8 tests)
+covers: that wrapping a target reparents it natively (proven, not
+assumed -- see above), that `MoveTo`/`ResizeTo`/`Frame` work the
+ordinary way against a `ScrollView` handle (reused unchanged from
+`hs_view_move_to()`/`hs_view_resize_to()`, same ABI-offset-0 reasoning
+as every other `HSView`-family handle -- `BScrollView` is `class
+BScrollView : public BView`, single non-virtual inheritance, confirmed
+from the real header), that wrapping a `ListView` works exactly the
+same as wrapping a plain `View` (the point of the feature), a null-
+target `ArgumentNullException`, the same `AddChild`/`Dispose()`-while-
+attached ownership rules every other `ViewBase` in this binding covers,
+and the two cascade-proof tests described above. `Sample.exe`'s
+`DemoListView` is now wrapped in a `ScrollView` (vertical scrollbar
+only) right where it used to be added directly to `DemoWindow` -- no
+change to `DemoListView`'s own frame was needed, since `BScrollView`'s
+real constructor takes the target's existing frame as the wrapper's own
+outer frame and shrinks the target inward to make room for the border
+and scrollbar, rather than growing outward past it. Confirmed with a
+real, cropped screenshot on the Haiku box: the list now renders with a
+visible vertical scrollbar -- thumb, track, and both arrow buttons --
+down its right edge, matching the real BeOS reference screenshot that
+started this. The full project test suite -- 172 tests across every
+module -- passes with 0 failures as of this pass.
 
 
 ## Running Sample.exe: what it demonstrates, and expected output

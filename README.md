@@ -8,15 +8,15 @@ A hand-written C shim (not a generator) exposes BeAPI's C++ classes to
 P/Invoke, with managed wrappers over the Application Kit (`BApplication`,
 `BMessage`) and a growing slice of the Interface Kit (`BWindow`, `BView`,
 and the `Button`/`TextControl`/`CheckBox`/`RadioButton`/`Slider`/
-`ColorControl`/`ListView` controls). See [`details.md`](details.md) for
+`ColorControl`/`ListView`/`ScrollView` controls). See [`details.md`](details.md) for
 the full design rationale -- why a hand-written shim, prior art, the
 current API surface class by class, and a deep-dive section per widget
 covering every fact verified on real Haiku hardware before being relied
 on. See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for open bugs found on real
 hardware that aren't fixed yet.
 
-![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels, and the DemoColorControl "Color:" grid with its RGB ramps and numeric fields, and the DemoListView showing its four items with
-"Alpha" selected](screenshots/sample-demo.png)
+![Sample.exe running on real Haiku hardware, showing DemoView's live input readout, the DemoButton "Click Me" button, the DemoTextControl "Type here:" field, the DemoCheckBox "Enable the text field above", the DemoRadioButton group "Option A"/"Option B"/"Option C", the DemoSlider "Volume:" control with its custom steel-blue bar color, hash marks, and "Quiet"/"Loud" limit labels, and the DemoColorControl "Color:" grid with its RGB ramps and numeric fields, the DemoListView (wrapped in a real ScrollView, showing a visible vertical scrollbar down its right edge) with its four items and "Alpha" selected, and the "Move Up"/"Move Down"/"Sort A-Z" buttons beneath
+it](screenshots/sample-demo.png)
 
 ## Building and running (on Haiku)
 

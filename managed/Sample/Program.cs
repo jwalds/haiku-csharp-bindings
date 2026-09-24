@@ -492,9 +492,16 @@ public class DemoColorControl : ColorControl
  * it's still constructed here inside DemoWindow's constructor, alongside
  * everything else, purely for consistency.
  *
- * No BScrollView wraps this list (out of scope -- see hs_list_view.h's
- * SCOPE note), so its frame is sized to show every row without clipping
- * rather than to demonstrate scrolling.
+ * Wrapped in a real BScrollView down in DemoWindow's own constructor --
+ * see ScrollView.cs/hs_scroll_view.h -- rather than here, since wrapping
+ * is a property of how a view gets attached to its parent, not of the
+ * view itself; DemoListView's own frame here is still what the
+ * ScrollView ends up occupying (see hs_scroll_view.h's WRAPPING AND
+ * REPARENTING note on why passing a view its final on-screen frame
+ * before wrapping it is the correct, real-BeAPI-idiomatic order, not a
+ * workaround). This is the actual fix for a real user-reported gap: a
+ * screenshot comparison against the real BeOS "Sliders, Tabs & Lists"
+ * demo app showed this list rendering with no visible scrollbar at all.
  */
 public class DemoListView : ListView
 {
@@ -618,7 +625,13 @@ public class DemoWindow : Window
 		AddChild(new DemoSlider());
 		AddChild(new DemoColorControl());
 		DemoListView listView = new DemoListView();
-		AddChild(listView);
+		// Wraps listView in a real, visible BScrollView (vertical
+		// scrollbar only -- this list never scrolls horizontally) --
+		// see ScrollView.cs's own remarks for why there's no separate
+		// AddChild(listView) call: hs_scroll_view_create() already
+		// reparented it as part of constructing listScroll, below.
+		ScrollView listScroll = new ScrollView("demo list scroll", listView, false, true);
+		AddChild(listScroll);
 		AddChild(new DemoListMoveUpButton(listView));
 		AddChild(new DemoListMoveDownButton(listView));
 		AddChild(new DemoListSortButton(listView));
